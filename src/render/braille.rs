@@ -2,13 +2,6 @@ use std::fmt::Write;
 use crate::render::{ColorLut, RenderGeometry};
 use crate::types::VideoFrame;
 
-const BAYER_2X4: [[u8; 2]; 4] = [
-    [ 20, 140],
-    [200,  80],
-    [ 60, 180],
-    [220, 100],
-];
-
 pub fn render_braille(
     frame: &VideoFrame,
     geom: &RenderGeometry,
@@ -72,21 +65,17 @@ pub fn render_braille(
             }
         }
 
-        // Active braille content
+        // Active braille content (2 subpixels horizontal x 4 subpixels vertical)
         for c in 0..act_c {
             let base_x = c * 2;
-            let mut pattern: u32 = 0;
-            let mut total_r_fg: u32 = 0;
-            let mut total_g_fg: u32 = 0;
-            let mut total_b_fg: u32 = 0;
-            let mut count_fg: u32 = 0;
 
-            let mut total_r_bg: u32 = 0;
-            let mut total_g_bg: u32 = 0;
-            let mut total_b_bg: u32 = 0;
-            let mut count_bg: u32 = 0;
+            let mut rgb = [(0u8, 0u8, 0u8); 8];
+            let mut luma = [0u32; 8];
+            let mut min_y = 255u32;
+            let mut max_y = 0u32;
+            let mut sum_y = 0u32;
 
-            for (dx, dy, bit) in DOTS {
+            for (i, &(dx, dy, _)) in DOTS.iter().enumerate() {
                 let px = base_x + dx;
                 let py = base_y + dy;
 
@@ -94,27 +83,65 @@ pub fn render_braille(
                     let idx = (py * frame_w + px) * 3;
                     if idx + 2 < data.len() {
                         let (r, g, b) = lut.transform_rgb(data[idx], data[idx + 1], data[idx + 2]);
-                        let y = ((r as u32 * 77 + g as u32 * 150 + b as u32 * 29) >> 8) as u8;
-                        let threshold = BAYER_2X4[dy][dx];
+                        rgb[i] = (r, g, b);
+                        let y = (r as u32 * 77 + g as u32 * 150 + b as u32 * 29) >> 8;
+                        luma[i] = y;
+                        if y < min_y { min_y = y; }
+                        if y > max_y { max_y = y; }
+                        sum_y += y;
+                    }
+                }
+            }
 
-                        if y > threshold {
-                            pattern |= bit;
-                            total_r_fg += r as u32;
-                            total_g_fg += g as u32;
-                            total_b_fg += b as u32;
-                            count_fg += 1;
-                        } else {
-                            total_r_bg += r as u32;
-                            total_g_bg += g as u32;
-                            total_b_bg += b as u32;
-                            count_bg += 1;
-                        }
+            let contrast_range = max_y.saturating_sub(min_y);
+            let mut pattern: u32 = 0;
+            let mut total_r_fg = 0u32;
+            let mut total_g_fg = 0u32;
+            let mut total_b_fg = 0u32;
+            let mut count_fg = 0u32;
+
+            let mut total_r_bg = 0u32;
+            let mut total_g_bg = 0u32;
+            let mut total_b_bg = 0u32;
+            let mut count_bg = 0u32;
+
+            if contrast_range < 16 {
+                // Smooth region: classify based on absolute brightness
+                let is_bright = (sum_y / 8) >= 128;
+                for (i, &(_, _, bit)) in DOTS.iter().enumerate() {
+                    if is_bright {
+                        pattern |= bit;
+                        total_r_fg += rgb[i].0 as u32;
+                        total_g_fg += rgb[i].1 as u32;
+                        total_b_fg += rgb[i].2 as u32;
+                        count_fg += 1;
+                    } else {
+                        total_r_bg += rgb[i].0 as u32;
+                        total_g_bg += rgb[i].1 as u32;
+                        total_b_bg += rgb[i].2 as u32;
+                        count_bg += 1;
+                    }
+                }
+            } else {
+                // High-detail / edge region: adaptive thresholding for maximum sharpness
+                let mid_y = (min_y + max_y) / 2;
+                for (i, &(_, _, bit)) in DOTS.iter().enumerate() {
+                    if luma[i] >= mid_y {
+                        pattern |= bit;
+                        total_r_fg += rgb[i].0 as u32;
+                        total_g_fg += rgb[i].1 as u32;
+                        total_b_fg += rgb[i].2 as u32;
+                        count_fg += 1;
+                    } else {
+                        total_r_bg += rgb[i].0 as u32;
+                        total_g_bg += rgb[i].1 as u32;
+                        total_b_bg += rgb[i].2 as u32;
+                        count_bg += 1;
                     }
                 }
             }
 
             if count_fg == 0 {
-                // All dots are background / dark
                 let bg_r = (total_r_bg / count_bg.max(1)) as u8;
                 let bg_g = (total_g_bg / count_bg.max(1)) as u8;
                 let bg_b = (total_b_bg / count_bg.max(1)) as u8;
@@ -125,7 +152,6 @@ pub fn render_braille(
                 }
                 buffer.push(' ');
             } else if count_bg == 0 {
-                // All dots are foreground / bright
                 let fg_r = (total_r_fg / count_fg) as u8;
                 let fg_g = (total_g_fg / count_fg) as u8;
                 let fg_b = (total_b_fg / count_fg) as u8;
