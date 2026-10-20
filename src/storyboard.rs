@@ -5,6 +5,8 @@ use anyhow::{Context, Result};
 use crossterm::terminal::size as terminal_size;
 
 use crate::generator::{ProceduralGenerator, TestPattern};
+use crate::render::ascii::render_ascii;
+use crate::render::braille::render_braille;
 use crate::render::half_block::render_half_block;
 use crate::render::quadrant::render_quadrant;
 use crate::render::{ColorLut, RenderGeometry};
@@ -103,6 +105,7 @@ pub fn print_storyboard(
 
     let (px_c, px_r) = match mode {
         RenderMode::Quadrant => (2, 2),
+        RenderMode::Braille => (2, 4),
         _ => (1, 2),
     };
 
@@ -183,6 +186,10 @@ pub fn print_storyboard(
                 let mut buf = String::new();
                 match mode {
                     RenderMode::Quadrant => render_quadrant(frame, &geom, &lut, &mut buf),
+                    RenderMode::Braille => render_braille(frame, &geom, &lut, &mut buf),
+                    RenderMode::Ascii | RenderMode::Shades | RenderMode::Mono => {
+                        render_ascii(frame, &geom, &lut, mode, &mut buf)
+                    }
                     _ => render_half_block(frame, &geom, &lut, &mut buf),
                 }
                 for line in buf.lines() {

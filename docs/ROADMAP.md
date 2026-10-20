@@ -16,8 +16,8 @@ This document outlines the strategic roadmap to grow **TermStream** into a high-
 - [x] **One-Click Demos & Easter Eggs**:
   - `termstream --bad-apple`: Stream the classic *Bad Apple!!* benchmark in high-res Braille/Quadrant TrueColor.
   - `termstream --rickroll`: Instant smooth playback demo.
-- [ ] **Modern Terminal Graphics Protocols**:
-  - Kitty Graphics Protocol (`-m kitty`) for true 1080p pixel rendering.
+- [x] **Modern Terminal Graphics Protocols**:
+  - Kitty Graphics Protocol (`-m kitty`) for true 1080p pixel rendering (Kitty, Ghostty, WezTerm).
   - Sixel protocol (`-m sixel`) support for iTerm2, WezTerm, foot, and mlterm.
 - [x] **Storyboard & File Manager Preview**:
   - `--grid` / `--storyboard` generating a 3x3 keyframe thumbnail contact sheet in the terminal.

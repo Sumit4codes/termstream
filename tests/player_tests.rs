@@ -286,3 +286,127 @@ fn test_safe_truncate_multibyte_utf8() {
     let short = "Short Title";
     assert_eq!(safe_truncate(short, 25), "Short Title");
 }
+
+#[test]
+fn test_render_kitty_output() {
+    use termstream::render::kitty::render_kitty;
+    use termstream::render::{ColorLut, RenderGeometry};
+    use termstream::types::{ColorFilter, VideoFrame};
+
+    let w = 16u32;
+    let h = 16u32;
+    let mut data = vec![0u8; (w * h * 3) as usize];
+    // Fill with sample gradient
+    for i in 0..(w * h) as usize {
+        data[i * 3] = (i % 256) as u8;
+        data[i * 3 + 1] = ((i * 2) % 256) as u8;
+        data[i * 3 + 2] = 255;
+    }
+
+    let frame = VideoFrame {
+        width: w,
+        height: h,
+        pts_secs: 0.0,
+        data,
+    };
+
+    let geom = RenderGeometry {
+        canvas_cols: 16,
+        canvas_rows: 16,
+        pixel_width: w,
+        pixel_height: h,
+        offset_cols: 2,
+        offset_rows: 1,
+        active_cols: 16,
+        active_rows: 16,
+    };
+
+    let lut = ColorLut::new(0, 1.0, false, ColorFilter::None);
+    let mut buffer = String::new();
+    render_kitty(&frame, &geom, &lut, &mut buffer);
+
+    // Verify deletion of previous placement
+    assert!(buffer.contains("\x1b_Ga=d,d=i,i=1\x1b\\"));
+    // Verify cursor positioning at offset (row 2, col 3)
+    assert!(buffer.contains("\x1b[2;3H"));
+    // Verify transmit and display command
+    assert!(buffer.contains("a=T,f=24,s=16,v=16,c=16,r=16,z=-1,q=2,i=1"));
+    // Verify clean APC termination
+    assert!(buffer.ends_with("\x1b\\"));
+}
+
+#[test]
+fn test_render_sixel_output() {
+    use termstream::render::sixel::render_sixel;
+    use termstream::render::{ColorLut, RenderGeometry};
+    use termstream::types::{ColorFilter, VideoFrame};
+
+    let w = 12u32;
+    let h = 12u32;
+    let mut data = vec![0u8; (w * h * 3) as usize];
+    // Flat blue test frame
+    for i in 0..(w * h) as usize {
+        data[i * 3] = 0;
+        data[i * 3 + 1] = 0;
+        data[i * 3 + 2] = 255;
+    }
+
+    let frame = VideoFrame {
+        width: w,
+        height: h,
+        pts_secs: 0.0,
+        data,
+    };
+
+    let geom = RenderGeometry {
+        canvas_cols: 12,
+        canvas_rows: 12,
+        pixel_width: w,
+        pixel_height: h,
+        offset_cols: 0,
+        offset_rows: 0,
+        active_cols: 12,
+        active_rows: 12,
+    };
+
+    let lut = ColorLut::new(0, 1.0, false, ColorFilter::None);
+    let mut buffer = String::new();
+    render_sixel(&frame, &geom, &lut, &mut buffer);
+
+    // Verify Sixel DCS header and raster dimensions
+    assert!(buffer.contains("\x1bP7;1;100q\"1;1;12;12"));
+    // Verify palette definition is embedded
+    assert!(buffer.contains("#0;2;0;0;0"));
+    // Verify RLE compression is used (runs of >= 4 repeated characters)
+    assert!(buffer.contains("!"));
+    // Verify Sixel string terminator
+    assert!(buffer.ends_with("\x1b\\"));
+}
+
+#[test]
+fn test_render_modes_pixel_cycle() {
+    use termstream::types::RenderMode;
+
+    let start = RenderMode::HalfBlock;
+    let m1 = start.next();
+    assert_eq!(m1, RenderMode::Quadrant);
+    let m2 = m1.next();
+    assert_eq!(m2, RenderMode::Braille);
+    let m3 = m2.next();
+    assert_eq!(m3, RenderMode::Shades);
+    let m4 = m3.next();
+    assert_eq!(m4, RenderMode::Ascii);
+    let m5 = m4.next();
+    assert_eq!(m5, RenderMode::Mono);
+    let m6 = m5.next();
+    assert_eq!(m6, RenderMode::Kitty);
+    let m7 = m6.next();
+    assert_eq!(m7, RenderMode::Sixel);
+    let loop_back = m7.next();
+    assert_eq!(loop_back, RenderMode::HalfBlock);
+
+    assert_eq!(RenderMode::Kitty.subpixels(), (8, 16));
+    assert_eq!(RenderMode::Sixel.subpixels(), (6, 12));
+    assert!(RenderMode::Kitty.name().contains("Kitty Pixel Graphics"));
+    assert!(RenderMode::Sixel.name().contains("Sixel Pixel Graphics"));
+}

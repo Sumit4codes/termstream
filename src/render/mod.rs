@@ -2,6 +2,8 @@ pub mod half_block;
 pub mod quadrant;
 pub mod braille;
 pub mod ascii;
+pub mod kitty;
+pub mod sixel;
 
 use crate::types::{ColorFilter, ScalingMode};
 
@@ -45,6 +47,19 @@ impl ColorLut {
             map_b,
             filter,
         }
+    }
+
+    #[inline(always)]
+    pub fn is_identity(&self) -> bool {
+        if self.filter != ColorFilter::None {
+            return false;
+        }
+        for i in 0..256 {
+            if self.map_r[i] != i as u8 || self.map_g[i] != i as u8 || self.map_b[i] != i as u8 {
+                return false;
+            }
+        }
+        true
     }
 
     #[inline(always)]

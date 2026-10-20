@@ -129,6 +129,8 @@ pub fn render_ui(
         RenderMode::Shades => "\x1b[38;2;255;160;100mSHADE",
         RenderMode::Ascii => "\x1b[38;2;140;255;140mASCII",
         RenderMode::Mono => "\x1b[38;2;80;255;80mMONO",
+        RenderMode::Kitty => "\x1b[38;2;255;120;220mKITTY-PIXEL",
+        RenderMode::Sixel => "\x1b[38;2;255;200;80mSIXEL-PIXEL",
     };
 
     // Loop badge
@@ -187,7 +189,7 @@ fn render_help_modal(cols: u16, rows: u16, buffer: &mut String) {
         "  0 .. 9           Seek to 0% .. 90%",
         "  Up / Down        Volume Up / Down (10%)",
         "  m                Toggle Mute",
-        "  M                Cycle Render Mode (Block/Quad/Braille/ASCII)",
+        "  v / M            Cycle Mode (Block/Quad/Braille/Kitty/Sixel)",
         "  a                Cycle Aspect Ratio (Fit/Fill/Stretch)",
         "  f                Cycle Color Filter (Green/Amber/Cyan/Mono)",
         "  b / B            Adjust Brightness (- / +)",

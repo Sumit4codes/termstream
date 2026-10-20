@@ -18,7 +18,7 @@ use termstream::generator::{ProceduralGenerator, TestPattern};
 use termstream::media::{MediaProbe, VideoStreamDecoder};
 use termstream::render::{
     ascii::render_ascii, braille::render_braille, half_block::render_half_block,
-    quadrant::render_quadrant, ColorLut, RenderGeometry,
+    kitty::render_kitty, quadrant::render_quadrant, sixel::render_sixel, ColorLut, RenderGeometry,
 };
 use termstream::types::{ColorFilter, MediaMetadata, OsdMode, RenderMode, ScalingMode, VideoFrame};
 use termstream::ui::{self, render_ui, UiState};
@@ -88,6 +88,8 @@ struct TerminalCleanup;
 impl Drop for TerminalCleanup {
     fn drop(&mut self) {
         let mut out = stdout();
+        // Clear any active Kitty graphics placements
+        let _ = write!(out, "\x1b_Ga=d,d=a\x1b\\");
         let _ = execute!(out, Show, LeaveAlternateScreen);
         let _ = disable_raw_mode();
         let _ = out.flush();
@@ -349,6 +351,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                 queued_frame = None;
                 current_frame = None;
                 let _ = execute!(out, crossterm::terminal::Clear(crossterm::terminal::ClearType::All));
+                let _ = write!(out, "\x1b_Ga=d,d=a\x1b\\");
                 needs_render = true;
             }
         }
@@ -530,6 +533,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                                 queued_frame = None;
                                 current_frame = None;
                                 let _ = execute!(out, crossterm::terminal::Clear(crossterm::terminal::ClearType::All));
+                                let _ = write!(out, "\x1b_Ga=d,d=a\x1b\\");
                                 ui_state.set_message(format!("Mode: {}", current_mode.name()));
                             }
                             KeyCode::Char('a') => {
@@ -662,6 +666,8 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                     RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => {
                         render_ascii(frame, &geom, &lut, current_mode, &mut buffer)
                     }
+                    RenderMode::Kitty => render_kitty(frame, &geom, &lut, &mut buffer),
+                    RenderMode::Sixel => render_sixel(frame, &geom, &lut, &mut buffer),
                 }
 
                 // Determine OSD visibility

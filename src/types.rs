@@ -14,6 +14,10 @@ pub enum RenderMode {
     Ascii,
     /// Retro monochrome ASCII art (green/amber phosphor or gray)
     Mono,
+    /// Kitty Graphics Protocol for true 24-bit pixel rendering (Kitty, Ghostty, WezTerm)
+    Kitty,
+    /// Sixel Graphics Protocol for true pixel graphics (iTerm2, WezTerm, foot, Konsole)
+    Sixel,
 }
 
 impl RenderMode {
@@ -23,6 +27,8 @@ impl RenderMode {
             RenderMode::Quadrant => (2, 2),
             RenderMode::Braille => (2, 4),
             RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
+            RenderMode::Kitty => (8, 16),
+            RenderMode::Sixel => (6, 12),
         }
     }
 
@@ -33,7 +39,9 @@ impl RenderMode {
             RenderMode::Braille => RenderMode::Shades,
             RenderMode::Shades => RenderMode::Ascii,
             RenderMode::Ascii => RenderMode::Mono,
-            RenderMode::Mono => RenderMode::HalfBlock,
+            RenderMode::Mono => RenderMode::Kitty,
+            RenderMode::Kitty => RenderMode::Sixel,
+            RenderMode::Sixel => RenderMode::HalfBlock,
         }
     }
 
@@ -45,6 +53,8 @@ impl RenderMode {
             RenderMode::Shades => "Unicode Shades ( ░▒▓█)",
             RenderMode::Ascii => "ASCII Ramp (@%#*+=-:. )",
             RenderMode::Mono => "Retro Mono Phosphor",
+            RenderMode::Kitty => "Kitty Pixel Graphics (Direct RGB)",
+            RenderMode::Sixel => "Sixel Pixel Graphics (Indexed RLE)",
         }
     }
 }
