@@ -15,8 +15,8 @@ A high-performance, feature-complete terminal video player built from scratch in
 
 - **Audio-Video Synchronization (A/V Sync)**:
   - Monotonic master clock with automatic drift compensation and dynamic frame-skipping when terminal I/O latency occurs.
-  - Real audio output powered by `rodio` / ALSA / PipeWire / PulseAudio.
-  - Volume control (0%–150%) and instant mute toggle.
+  - Chunked low-latency audio pipeline powered by `rodio` / ALSA / PipeWire / PulseAudio with zero thread contention.
+  - Built-in software preamp boost (+2.6 dB) with expanded volume control (0%–300%) and instant mute toggle.
 
 - **Interactive Terminal UI (OSD)**:
   - Bottom status bar showing playback state (`▶ PLAY` / `⏸ PAUSE`), elapsed & total time, visual progress bar, volume level, real-time FPS counter, and active render mode badge.
@@ -109,8 +109,8 @@ termstream --info /path/to/movie.mp4
 | <kbd>]</kbd> / <kbd>&gt;</kbd> | Seek forward 15 seconds |
 | <kbd>[</kbd> / <kbd>&lt;</kbd> | Seek backward 15 seconds |
 | <kbd>0</kbd> .. <kbd>9</kbd> | Seek directly to 0% .. 90% of video duration |
-| <kbd>↑</kbd> / <kbd>+</kbd> | Volume up 5% |
-| <kbd>↓</kbd> / <kbd>-</kbd> | Volume down 5% |
+| <kbd>↑</kbd> / <kbd>+</kbd> | Volume up 10% (up to 300%) |
+| <kbd>↓</kbd> / <kbd>-</kbd> | Volume down 10% |
 | <kbd>m</kbd> | Toggle Mute |
 | <kbd>v</kbd> / <kbd>M</kbd> | Cycle Render Mode (Half-Block → Braille → Shades → ASCII → Mono) |
 | <kbd>a</kbd> | Cycle Aspect Ratio (Fit → Fill → Stretch) |

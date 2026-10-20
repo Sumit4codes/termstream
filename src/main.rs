@@ -54,8 +54,8 @@ struct Args {
     #[arg(short, long)]
     r#loop: bool,
 
-    /// Initial volume percentage (0 - 150)
-    #[arg(long, default_value = "100")]
+    /// Initial volume percentage (0 - 300)
+    #[arg(long, default_value = "120")]
     volume: u32,
 
     /// Target frame rate override
@@ -165,7 +165,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
     let mut clock = Clock::new(0.0);
     let mut lut = ColorLut::new(brightness, contrast, invert, current_filter);
 
-    let initial_vol = (args.volume as f32 / 100.0).clamp(0.0, 1.5);
+    let initial_vol = (args.volume as f32 / 100.0).clamp(0.0, 3.0);
     let mut audio = match &source {
         VideoSource::Ffmpeg(path) if meta.has_audio && !args.no_audio => {
             let mut a = AudioPlayer::new(path.clone(), true);
@@ -410,13 +410,13 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                                 ui_state.set_message(format!("Seek {:2.0}%", frac * 100.0));
                             }
                             KeyCode::Up | KeyCode::Char('+') | KeyCode::Char('=') => {
-                                let new_vol = (audio.get_volume() + 0.05).min(1.5);
+                                let new_vol = (audio.get_volume() + 0.10).min(3.0);
                                 audio.set_volume(new_vol);
                                 ui_state.volume = new_vol;
                                 ui_state.set_message(format!("Volume {:3.0}%", new_vol * 100.0));
                             }
                             KeyCode::Down | KeyCode::Char('-') | KeyCode::Char('_') => {
-                                let new_vol = (audio.get_volume() - 0.05).max(0.0);
+                                let new_vol = (audio.get_volume() - 0.10).max(0.0);
                                 audio.set_volume(new_vol);
                                 ui_state.volume = new_vol;
                                 ui_state.set_message(format!("Volume {:3.0}%", new_vol * 100.0));

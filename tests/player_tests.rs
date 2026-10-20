@@ -131,3 +131,59 @@ fn test_clock_pause_resume() {
     std::thread::sleep(std::time::Duration::from_millis(50));
     assert!(clock.get_pts() > pts_at_pause);
 }
+
+#[test]
+fn test_pcm_source_chunked_streaming() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+    use termstream::audio::PcmSource;
+
+    let (tx, rx) = crossbeam_channel::bounded::<Vec<i16>>(4);
+    let samples_played = Arc::new(AtomicU64::new(0));
+    let mut source = PcmSource::new(rx, 44100, 2, Arc::clone(&samples_played));
+
+    // Send chunk of 4 samples
+    tx.send(vec![100, 200, -300, -400]).unwrap();
+
+    assert_eq!(source.next(), Some(100));
+    assert_eq!(source.next(), Some(200));
+    assert_eq!(source.next(), Some(-300));
+    assert_eq!(source.next(), Some(-400));
+    assert_eq!(samples_played.load(Ordering::Relaxed), 4);
+
+    // When empty, should yield silence without blocking
+    assert_eq!(source.next(), Some(0));
+    assert_eq!(samples_played.load(Ordering::Relaxed), 5);
+
+    // Drop sender -> Disconnected -> iterator should return None
+    drop(tx);
+    assert_eq!(source.next(), None);
+}
+
+#[test]
+fn test_audio_player_volume_and_preamp() {
+    use termstream::audio::AudioPlayer;
+
+    // Disabled audio player (no sound hardware needed in unit tests)
+    let mut player = AudioPlayer::new("dummy.mp4".into(), false);
+
+    player.set_volume(1.0);
+    assert_eq!(player.get_volume(), 1.0);
+    assert!((player.effective_volume() - 1.35).abs() < 0.001);
+
+    // Clamps to max 3.0 (300%)
+    player.set_volume(4.5);
+    assert_eq!(player.get_volume(), 3.0);
+    assert!((player.effective_volume() - 3.0 * AudioPlayer::PREAMP_GAIN).abs() < 0.001);
+
+    // Clamps to min 0.0
+    player.set_volume(-1.0);
+    assert_eq!(player.get_volume(), 0.0);
+
+    // Mute toggle
+    assert!(!player.is_muted());
+    assert!(player.toggle_mute());
+    assert!(player.is_muted());
+    assert!(!player.toggle_mute());
+    assert!(!player.is_muted());
+}

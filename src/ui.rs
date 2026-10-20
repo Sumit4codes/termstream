@@ -184,7 +184,7 @@ fn render_help_modal(cols: u16, rows: u16, buffer: &mut String) {
         "  Left / Right     Seek -/+ 5 seconds",
         "  [ / ]            Seek -/+ 15 seconds",
         "  0 .. 9           Seek to 0% .. 90%",
-        "  Up / Down        Volume Up / Down (5%)",
+        "  Up / Down        Volume Up / Down (10%)",
         "  m                Toggle Mute",
         "  M                Cycle Render Mode (Block/Braille/ASCII)",
         "  a                Cycle Aspect Ratio (Fit/Fill/Stretch)",
