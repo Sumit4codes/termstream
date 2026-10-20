@@ -50,6 +50,21 @@ impl ProceduralGenerator {
         }
     }
 
+    pub fn render_frame(
+        pattern: TestPattern,
+        target_w: u32,
+        target_h: u32,
+        t: f64,
+        frame_buf: &mut [u8],
+    ) {
+        match pattern {
+            TestPattern::Plasma => render_plasma(frame_buf, target_w, target_h, t),
+            TestPattern::Matrix => render_matrix(frame_buf, target_w, target_h, t),
+            TestPattern::Cube => render_cube(frame_buf, target_w, target_h, t),
+            TestPattern::Bars => render_bars(frame_buf, target_w, target_h, t),
+        }
+    }
+
     pub fn start(
         pattern: TestPattern,
         target_w: u32,
@@ -73,20 +88,7 @@ impl ProceduralGenerator {
                     let iter_start = Instant::now();
                     let t = start_instant.elapsed().as_secs_f64();
 
-                    match pattern {
-                        TestPattern::Plasma => {
-                            render_plasma(&mut frame_buf, target_w, target_h, t);
-                        }
-                        TestPattern::Matrix => {
-                            render_matrix(&mut frame_buf, target_w, target_h, t);
-                        }
-                        TestPattern::Cube => {
-                            render_cube(&mut frame_buf, target_w, target_h, t);
-                        }
-                        TestPattern::Bars => {
-                            render_bars(&mut frame_buf, target_w, target_h, t);
-                        }
-                    }
+                    Self::render_frame(pattern, target_w, target_h, t, &mut frame_buf);
 
                     let frame = VideoFrame {
                         width: target_w,

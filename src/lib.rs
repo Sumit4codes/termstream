@@ -6,3 +6,4 @@ pub mod render;
 pub mod types;
 pub mod ui;
 pub mod ytdl;
+pub mod storyboard;

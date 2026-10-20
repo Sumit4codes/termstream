@@ -77,6 +77,10 @@ struct Args {
     /// Print video metadata and exit
     #[arg(long)]
     info: bool,
+
+    /// Generate a 3x3 keyframe storyboard contact sheet and exit
+    #[arg(long, aliases = ["storyboard", "contact-sheet"])]
+    grid: bool,
 }
 
 struct TerminalCleanup;
@@ -186,6 +190,18 @@ fn main() -> Result<()> {
             }
         }
     };
+
+    if args.grid {
+        match &source {
+            VideoSource::Procedural(pat) => {
+                termstream::storyboard::print_storyboard(None, Some(*pat), &metadata, args.mode, args.filter)?;
+            }
+            VideoSource::Ffmpeg { video_path, .. } => {
+                termstream::storyboard::print_storyboard(Some(video_path), None, &metadata, args.mode, args.filter)?;
+            }
+        }
+        return Ok(());
+    }
 
     run_player(args, source, metadata)
 }

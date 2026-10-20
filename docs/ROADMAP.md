@@ -9,17 +9,17 @@ This document outlines the strategic roadmap to grow **TermStream** into a high-
 - [x] **High-Resolution Quadrant Mode (2x2)**: Doubled horizontal TrueColor resolution without dither noise.
 - [x] **Adaptive Edge-Preserving Braille Mode (2x4)**: High-density 8-dot matrix with contrast-aware dynamic thresholding.
 - [x] **Dynamic Real-time Resolution Scaling**: Instant font zoom (`Ctrl + -`) and resize detection.
-- [ ] **Native YouTube & Web Streaming (`yt-dlp` integration)**:
+- [x] **Native YouTube & Web Streaming (`yt-dlp` integration)**:
   - Play any YouTube URL directly: `termstream "https://www.youtube.com/watch?v=..."`
   - Shorthand support: `termstream yt:dQw4w9WgXcQ`
   - Zero local disk writes; stream directly through FFmpeg pipe.
-- [ ] **One-Click Demos & Easter Eggs**:
+- [x] **One-Click Demos & Easter Eggs**:
   - `termstream --bad-apple`: Stream the classic *Bad Apple!!* benchmark in high-res Braille/Quadrant TrueColor.
   - `termstream --rickroll`: Instant smooth playback demo.
 - [ ] **Modern Terminal Graphics Protocols**:
   - Kitty Graphics Protocol (`-m kitty`) for true 1080p pixel rendering.
   - Sixel protocol (`-m sixel`) support for iTerm2, WezTerm, foot, and mlterm.
-- [ ] **Storyboard & File Manager Preview**:
+- [x] **Storyboard & File Manager Preview**:
   - `--grid` / `--storyboard` generating a 3x3 keyframe thumbnail contact sheet in the terminal.
   - Integration plugin for `yazi`, `ranger`, and `lf`.
 
@@ -32,9 +32,9 @@ This document outlines the strategic roadmap to grow **TermStream** into a high-
     - Side-by-side comparison of Half-Block, Quadrant, and Braille modes.
     - Phosphor CRT filters (Matrix Green, Amber, Cyberpunk Cyan).
     - Audio visualization / synchronized interactive OSD.
-- [ ] **README Badges & Architecture Diagram**:
-  - Crates.io version, CI status, platform compatibility matrix.
-  - Clean comparison table against `mpv --vo=caca`, `tplay`, and `chafa`.
+- [x] **README Badges & Architecture Diagram**:
+  - CI status, license, and platform compatibility badges.
+  - Comprehensive comparison table against `mpv --vo=caca`, `tplay`, and `chafa`.
 
 ---
 
@@ -42,12 +42,9 @@ This document outlines the strategic roadmap to grow **TermStream** into a high-
 
 - [ ] **Crates.io Release**:
   - `cargo publish` for instant `cargo install termstream`.
-- [ ] **Automated GitHub Releases**:
-  - GitHub Actions CI matrix with `cargo-dist` / `cross` compiling standalone binaries for:
-    - Linux `x86_64` & `aarch64` (glibc and musl static).
-    - macOS Intel (`x86_64-apple-darwin`) & Apple Silicon (`aarch64-apple-darwin`).
-    - Windows (`x86_64-pc-windows-msvc`).
-  - Enable `cargo-binstall termstream` (downloads pre-built binary in 2 seconds).
+- [x] **Automated GitHub Releases**:
+  - GitHub Actions CI matrix with automated testing across Linux, macOS, and Windows.
+  - Cross-compilation release pipeline for Linux (x86_64, aarch64), macOS (Intel, Apple Silicon), and Windows.
 - [ ] **Package Repositories**:
   - Homebrew tap (`brew install sumit/tap/termstream`).
   - Arch Linux AUR (`termstream-bin`).

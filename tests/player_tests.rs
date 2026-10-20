@@ -248,3 +248,20 @@ fn test_ytdl_url_parsing_and_binary_detection() {
         assert!(bin.to_string_lossy().contains("yt-dlp"));
     }
 }
+
+#[test]
+fn test_storyboard_procedural_generation() {
+    use termstream::generator::{ProceduralGenerator, TestPattern};
+    use termstream::storyboard::print_storyboard;
+    use termstream::types::{ColorFilter, RenderMode};
+
+    let meta = ProceduralGenerator::metadata(TestPattern::Bars);
+    let result = print_storyboard(
+        None,
+        Some(TestPattern::Bars),
+        &meta,
+        RenderMode::HalfBlock,
+        ColorFilter::None,
+    );
+    assert!(result.is_ok());
+}
