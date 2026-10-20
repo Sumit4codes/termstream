@@ -265,3 +265,24 @@ fn test_storyboard_procedural_generation() {
     );
     assert!(result.is_ok());
 }
+
+#[test]
+fn test_safe_truncate_multibyte_utf8() {
+    use termstream::storyboard::safe_truncate;
+
+    // Multi-byte CJK string that panicked previously
+    let cjk = "【東方】Bad Apple!! ＰＶ【影絵】";
+    let truncated_cjk = safe_truncate(cjk, 10);
+    assert!(truncated_cjk.ends_with('…'));
+    assert_eq!(truncated_cjk.chars().count(), 10);
+
+    // Emoji string
+    let emoji = "🎬📺🚀 TermStream is blazing fast and super awesome!";
+    let truncated_emoji = safe_truncate(emoji, 12);
+    assert!(truncated_emoji.ends_with('…'));
+    assert_eq!(truncated_emoji.chars().count(), 12);
+
+    // Short string (no truncation needed)
+    let short = "Short Title";
+    assert_eq!(safe_truncate(short, 25), "Short Title");
+}

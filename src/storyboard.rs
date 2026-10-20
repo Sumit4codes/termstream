@@ -1,5 +1,6 @@
 use std::io::Read;
 use std::process::{Command, Stdio};
+use std::thread;
 use anyhow::{Context, Result};
 use crossterm::terminal::size as terminal_size;
 
@@ -9,6 +10,17 @@ use crate::render::quadrant::render_quadrant;
 use crate::render::{ColorLut, RenderGeometry};
 use crate::types::{ColorFilter, MediaMetadata, RenderMode, VideoFrame};
 use crate::ui::format_time;
+
+/// Safely truncate a UTF-8 string by character count (never panics on multi-byte boundaries)
+pub fn safe_truncate(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count > max_chars {
+        let truncated: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+        format!("{}…", truncated)
+    } else {
+        s.to_string()
+    }
+}
 
 /// Extract a single frame from video at timestamp using FFmpeg
 pub fn extract_frame(
@@ -62,13 +74,14 @@ pub fn print_storyboard(
     let (term_cols, _) = terminal_size().unwrap_or((80, 24));
     let lut = ColorLut::new(0, 1.0, false, filter);
 
-    let title = meta.title.as_deref().unwrap_or("Media Stream");
+    let raw_title = meta.title.as_deref().unwrap_or("Media Stream");
+    let display_title = safe_truncate(raw_title, 25);
     let duration = if meta.duration_secs > 0.0 { meta.duration_secs } else { 30.0 };
 
     println!("\x1b[1;38;2;120;180;255m┌─────────────────────────── TermStream Storyboard ───────────────────────────┐\x1b[0m");
     println!(
         "\x1b[38;2;200;210;230m│ \x1b[1m{:<25}\x1b[0m \x1b[38;2;150;160;180mDuration: \x1b[38;2;255;255;255m{}\x1b[38;2;150;160;180m  Res: \x1b[38;2;255;255;255m{}x{}\x1b[38;2;150;160;180m  FPS: \x1b[38;2;255;255;255m{:.1}\x1b[38;2;200;210;230m │\x1b[0m",
-        if title.len() > 25 { &title[..25] } else { title },
+        display_title,
         format_time(meta.duration_secs),
         meta.width,
         meta.height,
@@ -106,6 +119,33 @@ pub fn print_storyboard(
 
     let total_frames = COLS * ROWS;
 
+    // Extract all 9 keyframes concurrently in parallel (dramatically speeds up web/YouTube streams)
+    let all_frames: Vec<Option<VideoFrame>> = thread::scope(|s| {
+        let handles: Vec<_> = (0..total_frames)
+            .map(|idx| {
+                let time_secs = duration * ((idx + 1) as f64 / (total_frames + 1) as f64);
+                s.spawn(move || {
+                    if let Some(pat) = pattern {
+                        let mut data = vec![0u8; (geom.pixel_width * geom.pixel_height * 3) as usize];
+                        ProceduralGenerator::render_frame(pat, geom.pixel_width, geom.pixel_height, time_secs, &mut data);
+                        Some(VideoFrame {
+                            width: geom.pixel_width,
+                            height: geom.pixel_height,
+                            pts_secs: time_secs,
+                            data,
+                        })
+                    } else if let Some(path) = video_path {
+                        extract_frame(path, geom.pixel_width, geom.pixel_height, time_secs).ok()
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+
+        handles.into_iter().map(|h| h.join().unwrap_or(None)).collect()
+    });
+
     for grid_row in 0..ROWS {
         // 1. Print timestamps header for this row
         for grid_col in 0..COLS {
@@ -130,32 +170,14 @@ pub fn print_storyboard(
         }
         println!();
 
-        // 2. Fetch frames for each column in this row
-        let mut row_frames: Vec<Option<VideoFrame>> = Vec::new();
-        for grid_col in 0..COLS {
-            let idx = grid_row * COLS + grid_col;
-            let time_secs = duration * ((idx + 1) as f64 / (total_frames + 1) as f64);
-
-            let frame = if let Some(pat) = pattern {
-                let mut data = vec![0u8; (geom.pixel_width * geom.pixel_height * 3) as usize];
-                ProceduralGenerator::render_frame(pat, geom.pixel_width, geom.pixel_height, time_secs, &mut data);
-                Some(VideoFrame {
-                    width: geom.pixel_width,
-                    height: geom.pixel_height,
-                    pts_secs: time_secs,
-                    data,
-                })
-            } else if let Some(path) = video_path {
-                extract_frame(path, geom.pixel_width, geom.pixel_height, time_secs).ok()
-            } else {
-                None
-            };
-            row_frames.push(frame);
-        }
+        // 2. Collect frames for this row
+        let row_frames: Vec<&Option<VideoFrame>> = (0..COLS)
+            .map(|grid_col| &all_frames[grid_row * COLS + grid_col])
+            .collect();
 
         // 3. Render lines side-by-side
         let mut cell_lines: Vec<Vec<String>> = Vec::new();
-        for maybe_frame in &row_frames {
+        for maybe_frame in row_frames {
             let mut lines = Vec::new();
             if let Some(frame) = maybe_frame {
                 let mut buf = String::new();
