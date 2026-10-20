@@ -5,3 +5,4 @@ pub mod media;
 pub mod render;
 pub mod types;
 pub mod ui;
+pub mod ytdl;

@@ -33,6 +33,8 @@ A high-performance, feature-complete terminal video player built from scratch in
 
 - **Universal Media Support**:
   - Local video files (`.mp4`, `.mkv`, `.webm`, `.avi`, `.mov`, `.gif`, etc.)
+  - **YouTube & Web Streaming (via `yt-dlp`)**: Direct URL playback (`https://...`, `yt:<id>`), Vimeo, Twitch, and web clips with automatic A/V demuxing and streaming.
+  - **One-Click Benchmarks**: Instant streaming with `--bad-apple` and `--rickroll`.
   - Network streams & URLs (HTTP/HTTPS, RTSP)
   - V4L2 Webcams (`/dev/video0`)
   - **Built-in Procedural Generators**: Demo modes playable immediately without any video file:
@@ -51,6 +53,10 @@ A high-performance, feature-complete terminal video player built from scratch in
 - `ffmpeg` and `ffprobe` installed on your system:
   ```bash
   sudo apt install ffmpeg
+  ```
+- *(Optional, for YouTube/web streaming)* `yt-dlp`:
+  ```bash
+  pip install --user yt-dlp   # or: sudo apt install yt-dlp
   ```
 
 ### Build & Install
@@ -79,6 +85,16 @@ termstream --test
 ```bash
 # Play local video file
 termstream /path/to/movie.mp4
+
+# Stream any YouTube video directly (requires yt-dlp)
+termstream "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+termstream yt:aqz-KE-bpKQ
+
+# Play classic "Bad Apple!!" benchmark directly in Braille mode
+termstream --bad-apple -m braille
+
+# Play "Never Gonna Give You Up" directly in high-res Quadrant mode
+termstream --rickroll -m quadrant
 
 # Play in high-resolution Quadrant 2x2 mode
 termstream -m quadrant /path/to/movie.mp4

@@ -62,6 +62,14 @@ struct Args {
     #[arg(long)]
     fps: Option<f64>,
 
+    /// Stream classic "Bad Apple!!" YouTube benchmark
+    #[arg(long)]
+    bad_apple: bool,
+
+    /// Stream Rick Astley's "Never Gonna Give You Up"
+    #[arg(long)]
+    rickroll: bool,
+
     /// Run built-in procedural demo pattern
     #[arg(long)]
     test: bool,
@@ -83,7 +91,10 @@ impl Drop for TerminalCleanup {
 }
 
 enum VideoSource {
-    Ffmpeg(String),
+    Ffmpeg {
+        video_path: String,
+        audio_path: String,
+    },
     Procedural(TestPattern),
 }
 
@@ -111,31 +122,67 @@ fn resolve_input_path(raw: &str) -> String {
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    let (source, metadata) = match &args.input {
-        Some(s) if s.starts_with("test:") || s == "matrix" || s == "cube" || s == "bars" || s == "plasma" => {
-            let pattern = TestPattern::parse(s);
-            (VideoSource::Procedural(pattern), ProceduralGenerator::metadata(pattern))
-        }
-        Some(raw_path) => {
-            let path = resolve_input_path(raw_path);
-            let meta = MediaProbe::probe(&path)?;
-            if args.info {
-                println!("TermStream Media Info:");
-                println!("  Title:       {}", meta.title.as_deref().unwrap_or("Unknown"));
-                println!("  Resolution:  {}x{}", meta.width, meta.height);
-                println!("  FPS:         {:.2}", meta.fps);
-                println!("  Duration:    {:.2}s ({})", meta.duration_secs, ui::format_time(meta.duration_secs));
-                println!("  Audio:       {}", if meta.has_audio { format!("{} Hz, {} channels", meta.audio_sample_rate, meta.audio_channels) } else { "No audio".to_string() });
-                return Ok(());
-            }
-            (VideoSource::Ffmpeg(path), meta)
-        }
-        None => {
-            if args.test || args.input.is_none() {
-                let pattern = TestPattern::Plasma;
+    let (source, metadata) = if args.bad_apple {
+        println!("Fetching Bad Apple!! stream via yt-dlp...");
+        let stream = termstream::ytdl::YtDlp::resolve(termstream::ytdl::BAD_APPLE_URL)?;
+        println!("Streaming: {}", stream.title);
+        let mut meta = MediaProbe::probe(&stream.video_url)?;
+        meta.title = Some(stream.title);
+        meta.has_audio = true;
+        (VideoSource::Ffmpeg { video_path: stream.video_url, audio_path: stream.audio_url }, meta)
+    } else if args.rickroll {
+        println!("Fetching Rick Astley stream via yt-dlp...");
+        let stream = termstream::ytdl::YtDlp::resolve(termstream::ytdl::RICKROLL_URL)?;
+        println!("Streaming: {}", stream.title);
+        let mut meta = MediaProbe::probe(&stream.video_url)?;
+        meta.title = Some(stream.title);
+        meta.has_audio = true;
+        (VideoSource::Ffmpeg { video_path: stream.video_url, audio_path: stream.audio_url }, meta)
+    } else {
+        match &args.input {
+            Some(s) if s.starts_with("test:") || s == "matrix" || s == "cube" || s == "bars" || s == "plasma" => {
+                let pattern = TestPattern::parse(s);
                 (VideoSource::Procedural(pattern), ProceduralGenerator::metadata(pattern))
-            } else {
-                anyhow::bail!("No input provided. Usage: termstream <FILE_OR_URL> or termstream --test");
+            }
+            Some(raw) if termstream::ytdl::YtDlp::is_web_url(raw) => {
+                println!("Fetching web video stream via yt-dlp: {}...", raw);
+                let stream = termstream::ytdl::YtDlp::resolve(raw)?;
+                println!("Streaming: {}", stream.title);
+                let mut meta = MediaProbe::probe(&stream.video_url)?;
+                meta.title = Some(stream.title);
+                meta.has_audio = true;
+                if args.info {
+                    println!("TermStream Media Info:");
+                    println!("  Title:       {}", meta.title.as_deref().unwrap_or("Unknown"));
+                    println!("  Resolution:  {}x{}", meta.width, meta.height);
+                    println!("  FPS:         {:.2}", meta.fps);
+                    println!("  Duration:    {:.2}s ({})", meta.duration_secs, ui::format_time(meta.duration_secs));
+                    println!("  Audio:       {}", if meta.has_audio { format!("{} Hz, {} channels", meta.audio_sample_rate, meta.audio_channels) } else { "No audio".to_string() });
+                    return Ok(());
+                }
+                (VideoSource::Ffmpeg { video_path: stream.video_url, audio_path: stream.audio_url }, meta)
+            }
+            Some(raw_path) => {
+                let path = resolve_input_path(raw_path);
+                let meta = MediaProbe::probe(&path)?;
+                if args.info {
+                    println!("TermStream Media Info:");
+                    println!("  Title:       {}", meta.title.as_deref().unwrap_or("Unknown"));
+                    println!("  Resolution:  {}x{}", meta.width, meta.height);
+                    println!("  FPS:         {:.2}", meta.fps);
+                    println!("  Duration:    {:.2}s ({})", meta.duration_secs, ui::format_time(meta.duration_secs));
+                    println!("  Audio:       {}", if meta.has_audio { format!("{} Hz, {} channels", meta.audio_sample_rate, meta.audio_channels) } else { "No audio".to_string() });
+                    return Ok(());
+                }
+                (VideoSource::Ffmpeg { video_path: path.clone(), audio_path: path }, meta)
+            }
+            None => {
+                if args.test || args.input.is_none() {
+                    let pattern = TestPattern::Plasma;
+                    (VideoSource::Procedural(pattern), ProceduralGenerator::metadata(pattern))
+                } else {
+                    anyhow::bail!("No input provided. Usage: termstream <FILE_OR_URL> or termstream --test");
+                }
             }
         }
     };
@@ -167,8 +214,8 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
 
     let initial_vol = (args.volume as f32 / 100.0).clamp(0.0, 3.0);
     let mut audio = match &source {
-        VideoSource::Ffmpeg(path) if meta.has_audio && !args.no_audio => {
-            let mut a = AudioPlayer::new(path.clone(), true);
+        VideoSource::Ffmpeg { audio_path, .. } if meta.has_audio && !args.no_audio => {
+            let mut a = AudioPlayer::new(audio_path.clone(), true);
             a.set_volume(initial_vol);
             a
         }
@@ -209,9 +256,9 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
 
     let start_decoders = |source: &VideoSource, geom: &RenderGeometry, fps: f64, seek: f64| {
         match source {
-            VideoSource::Ffmpeg(path) => {
+            VideoSource::Ffmpeg { video_path, .. } => {
                 let dec = VideoStreamDecoder::start(
-                    path.clone(),
+                    video_path.clone(),
                     geom.pixel_width,
                     geom.pixel_height,
                     fps,

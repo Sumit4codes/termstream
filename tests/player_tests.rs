@@ -211,3 +211,40 @@ fn test_audio_player_volume_and_preamp() {
     assert!(!player.toggle_mute());
     assert!(!player.is_muted());
 }
+
+#[test]
+fn test_ytdl_url_parsing_and_binary_detection() {
+    use termstream::ytdl::YtDlp;
+
+    // Web URL detection
+    assert!(YtDlp::is_web_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
+    assert!(YtDlp::is_web_url("http://vimeo.com/123456"));
+    assert!(YtDlp::is_web_url("yt:dQw4w9WgXcQ"));
+    assert!(YtDlp::is_web_url("ytdl:https://example.com/video.mp4"));
+    assert!(YtDlp::is_web_url("youtube:dQw4w9WgXcQ"));
+    assert!(!YtDlp::is_web_url("/path/to/local/movie.mp4"));
+    assert!(!YtDlp::is_web_url("test:plasma"));
+
+    // URL normalization
+    assert_eq!(
+        YtDlp::normalize_url("yt:dQw4w9WgXcQ"),
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    );
+    assert_eq!(
+        YtDlp::normalize_url("youtube:FtutLA63Cp8"),
+        "https://www.youtube.com/watch?v=FtutLA63Cp8"
+    );
+    assert_eq!(
+        YtDlp::normalize_url("ytdl:https://vimeo.com/123"),
+        "https://vimeo.com/123"
+    );
+    assert_eq!(
+        YtDlp::normalize_url("https://youtu.be/dQw4w9WgXcQ"),
+        "https://youtu.be/dQw4w9WgXcQ"
+    );
+
+    // Finding binary should succeed if yt-dlp is present
+    if let Ok(bin) = YtDlp::find_binary() {
+        assert!(bin.to_string_lossy().contains("yt-dlp"));
+    }
+}
