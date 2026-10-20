@@ -143,6 +143,7 @@ impl VideoStreamDecoder {
             "-i", &path,
             "-an",
             "-sn",
+            "-sws_flags", "lanczos+accurate_rnd",
             "-f", "rawvideo",
             "-pix_fmt", "rgb24",
             "-s", &format!("{}x{}", target_width, target_height),
