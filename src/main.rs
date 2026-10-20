@@ -87,6 +87,27 @@ enum VideoSource {
     Procedural(TestPattern),
 }
 
+fn resolve_input_path(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if std::path::Path::new(trimmed).exists() {
+        return trimmed.to_string();
+    }
+    // Handle paths that got line-wrapped during terminal copy-paste
+    let unwrapped = raw
+        .lines()
+        .map(|l| l.trim())
+        .collect::<Vec<_>>()
+        .join("");
+    if std::path::Path::new(&unwrapped).exists() {
+        return unwrapped;
+    }
+    let unquoted = trimmed.trim_matches('\'').trim_matches('"');
+    if std::path::Path::new(unquoted).exists() {
+        return unquoted.to_string();
+    }
+    trimmed.to_string()
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -95,8 +116,9 @@ fn main() -> Result<()> {
             let pattern = TestPattern::parse(s);
             (VideoSource::Procedural(pattern), ProceduralGenerator::metadata(pattern))
         }
-        Some(path) => {
-            let meta = MediaProbe::probe(path)?;
+        Some(raw_path) => {
+            let path = resolve_input_path(raw_path);
+            let meta = MediaProbe::probe(&path)?;
             if args.info {
                 println!("TermStream Media Info:");
                 println!("  Title:       {}", meta.title.as_deref().unwrap_or("Unknown"));
@@ -106,7 +128,7 @@ fn main() -> Result<()> {
                 println!("  Audio:       {}", if meta.has_audio { format!("{} Hz, {} channels", meta.audio_sample_rate, meta.audio_channels) } else { "No audio".to_string() });
                 return Ok(());
             }
-            (VideoSource::Ffmpeg(path.clone()), meta)
+            (VideoSource::Ffmpeg(path), meta)
         }
         None => {
             if args.test || args.input.is_none() {
@@ -221,235 +243,28 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
     clock.start();
 
     let mut current_frame: Option<VideoFrame> = None;
+    let mut queued_frame: Option<VideoFrame> = None;
     let mut buffer = String::with_capacity((cols as usize * rows as usize) * 35);
     let mut frame_count: u64 = 0;
     let mut fps_timer = Instant::now();
+    let frame_interval = 1.0 / fps;
 
     loop {
-        // 1. Process Input Events
-        while event::poll(Duration::from_millis(0))? {
-            let ev = event::read()?;
-            match ev {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    last_interaction = Instant::now();
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                        KeyCode::Char(' ') | KeyCode::Char('k') => {
-                            let paused = clock.toggle_pause();
-                            ui_state.is_paused = paused;
-                            if paused {
-                                audio.pause();
-                                ui_state.set_message("PAUSED");
-                            } else {
-                                audio.resume();
-                                ui_state.set_message("PLAYING");
-                            }
-                        }
-                        KeyCode::Right | KeyCode::Char('l') => {
-                            let new_pts = (clock.get_pts() + 5.0).min(meta.duration_secs.max(60000.0));
-                            clock.seek_to(new_pts);
-                            let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
-                            ffmpeg_decoder = dec;
-                            proc_generator = gen;
-                            let _ = audio.start(new_pts);
-                            ui_state.set_message("+5s Seek");
-                        }
-                        KeyCode::Left | KeyCode::Char('j') => {
-                            let new_pts = (clock.get_pts() - 5.0).max(0.0);
-                            clock.seek_to(new_pts);
-                            let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
-                            ffmpeg_decoder = dec;
-                            proc_generator = gen;
-                            let _ = audio.start(new_pts);
-                            ui_state.set_message("-5s Seek");
-                        }
-                        KeyCode::Char(']') | KeyCode::Char('>') => {
-                            let new_pts = (clock.get_pts() + 15.0).min(meta.duration_secs.max(60000.0));
-                            clock.seek_to(new_pts);
-                            let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
-                            ffmpeg_decoder = dec;
-                            proc_generator = gen;
-                            let _ = audio.start(new_pts);
-                            ui_state.set_message("+15s Seek");
-                        }
-                        KeyCode::Char('[') | KeyCode::Char('<') => {
-                            let new_pts = (clock.get_pts() - 15.0).max(0.0);
-                            clock.seek_to(new_pts);
-                            let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
-                            ffmpeg_decoder = dec;
-                            proc_generator = gen;
-                            let _ = audio.start(new_pts);
-                            ui_state.set_message("-15s Seek");
-                        }
-                        KeyCode::Char(c) if c.is_ascii_digit() && meta.duration_secs > 0.0 => {
-                            let frac = (c as u32 - '0' as u32) as f64 / 10.0;
-                            let new_pts = meta.duration_secs * frac;
-                            clock.seek_to(new_pts);
-                            let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
-                            ffmpeg_decoder = dec;
-                            proc_generator = gen;
-                            let _ = audio.start(new_pts);
-                            ui_state.set_message(format!("Seek {:2.0}%", frac * 100.0));
-                        }
-                        KeyCode::Up | KeyCode::Char('+') | KeyCode::Char('=') => {
-                            let new_vol = (audio.get_volume() + 0.05).min(1.5);
-                            audio.set_volume(new_vol);
-                            ui_state.volume = new_vol;
-                            ui_state.set_message(format!("Volume {:3.0}%", new_vol * 100.0));
-                        }
-                        KeyCode::Down | KeyCode::Char('-') | KeyCode::Char('_') => {
-                            let new_vol = (audio.get_volume() - 0.05).max(0.0);
-                            audio.set_volume(new_vol);
-                            ui_state.volume = new_vol;
-                            ui_state.set_message(format!("Volume {:3.0}%", new_vol * 100.0));
-                        }
-                        KeyCode::Char('m') => {
-                            let muted = audio.toggle_mute();
-                            ui_state.is_muted = muted;
-                            ui_state.set_message(if muted { "Muted" } else { "Unmuted" });
-                        }
-                        KeyCode::Char('v') | KeyCode::Char('M') => {
-                            current_mode = current_mode.next();
-                            ui_state.render_mode = current_mode;
-                            let (px_c, px_r) = match current_mode {
-                                RenderMode::HalfBlock => (1, 2),
-                                RenderMode::Braille => (2, 4),
-                                RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
-                            };
-                            geom = RenderGeometry::calculate(
-                                cols,
-                                rows.saturating_sub(1),
-                                meta.width,
-                                meta.height,
-                                current_scaling,
-                                px_c,
-                                px_r,
-                            );
-                            let pts = clock.get_pts();
-                            let (dec, gen) = start_decoders(&source, &geom, fps, pts);
-                            ffmpeg_decoder = dec;
-                            proc_generator = gen;
-                            ui_state.set_message(format!("Mode: {}", current_mode.name()));
-                        }
-                        KeyCode::Char('a') => {
-                            current_scaling = current_scaling.next();
-                            ui_state.scaling_mode = current_scaling;
-                            let (px_c, px_r) = match current_mode {
-                                RenderMode::HalfBlock => (1, 2),
-                                RenderMode::Braille => (2, 4),
-                                RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
-                            };
-                            geom = RenderGeometry::calculate(
-                                cols,
-                                rows.saturating_sub(1),
-                                meta.width,
-                                meta.height,
-                                current_scaling,
-                                px_c,
-                                px_r,
-                            );
-                            let pts = clock.get_pts();
-                            let (dec, gen) = start_decoders(&source, &geom, fps, pts);
-                            ffmpeg_decoder = dec;
-                            proc_generator = gen;
-                            ui_state.set_message(format!("Aspect: {}", current_scaling.name()));
-                        }
-                        KeyCode::Char('f') => {
-                            current_filter = current_filter.next();
-                            ui_state.color_filter = current_filter;
-                            lut = ColorLut::new(brightness, contrast, invert, current_filter);
-                            ui_state.set_message(format!("Filter: {}", current_filter.name()));
-                        }
-                        KeyCode::Char('b') => {
-                            brightness = (brightness - 10).max(-100);
-                            ui_state.brightness = brightness;
-                            lut = ColorLut::new(brightness, contrast, invert, current_filter);
-                            ui_state.set_message(format!("Brightness: {}", brightness));
-                        }
-                        KeyCode::Char('B') => {
-                            brightness = (brightness + 10).min(100);
-                            ui_state.brightness = brightness;
-                            lut = ColorLut::new(brightness, contrast, invert, current_filter);
-                            ui_state.set_message(format!("Brightness: +{}", brightness));
-                        }
-                        KeyCode::Char('c') => {
-                            contrast = (contrast - 0.1).max(0.2);
-                            ui_state.contrast = contrast;
-                            lut = ColorLut::new(brightness, contrast, invert, current_filter);
-                            ui_state.set_message(format!("Contrast: {:.1}x", contrast));
-                        }
-                        KeyCode::Char('C') => {
-                            contrast = (contrast + 0.1).min(3.0);
-                            ui_state.contrast = contrast;
-                            lut = ColorLut::new(brightness, contrast, invert, current_filter);
-                            ui_state.set_message(format!("Contrast: {:.1}x", contrast));
-                        }
-                        KeyCode::Char('i') => {
-                            invert = !invert;
-                            ui_state.invert = invert;
-                            lut = ColorLut::new(brightness, contrast, invert, current_filter);
-                            ui_state.set_message(if invert { "Colors Inverted" } else { "Colors Normal" });
-                        }
-                        KeyCode::Char('r') => {
-                            brightness = 0;
-                            contrast = 1.0;
-                            invert = false;
-                            current_filter = ColorFilter::None;
-                            ui_state.brightness = brightness;
-                            ui_state.contrast = contrast;
-                            ui_state.invert = invert;
-                            ui_state.color_filter = current_filter;
-                            lut = ColorLut::new(brightness, contrast, invert, current_filter);
-                            ui_state.set_message("Adjustments Reset");
-                        }
-                        KeyCode::Char('p') | KeyCode::Char('L') => {
-                            is_looping = !is_looping;
-                            ui_state.is_looping = is_looping;
-                            ui_state.set_message(if is_looping { "Looping On" } else { "Looping Off" });
-                        }
-                        KeyCode::Tab | KeyCode::Char('o') => {
-                            osd_mode = osd_mode.next();
-                            ui_state.osd_mode = osd_mode;
-                            ui_state.set_message(match osd_mode {
-                                OsdMode::AutoHide => "OSD: Auto-hide",
-                                OsdMode::AlwaysOn => "OSD: Always Visible",
-                                OsdMode::Off => "OSD: Hidden",
-                            });
-                        }
-                        KeyCode::Char('?') | KeyCode::Char('h') => {
-                            ui_state.show_help = !ui_state.show_help;
-                        }
-                        _ => {}
-                    }
+        // Compute Current Master Clock PTS
+        let clock_pts = clock.get_pts();
+        let current_pts = if !clock.is_paused() {
+            if let Some(apts) = audio.current_pts() {
+                if (apts - clock_pts).abs() < 1.0 {
+                    apts
+                } else {
+                    clock_pts
                 }
-                Event::Resize(new_cols, new_rows) => {
-                    cols = new_cols;
-                    rows = new_rows;
-                    let (px_c, px_r) = match current_mode {
-                        RenderMode::HalfBlock => (1, 2),
-                        RenderMode::Braille => (2, 4),
-                        RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
-                    };
-                    geom = RenderGeometry::calculate(
-                        cols,
-                        rows.saturating_sub(1),
-                        meta.width,
-                        meta.height,
-                        current_scaling,
-                        px_c,
-                        px_r,
-                    );
-                    let pts = clock.get_pts();
-                    let (dec, gen) = start_decoders(&source, &geom, fps, pts);
-                    ffmpeg_decoder = dec;
-                    proc_generator = gen;
-                }
-                _ => {}
+            } else {
+                clock_pts
             }
-        }
-
-        // 2. AV Sync Clock & Frame Fetching
-        let current_pts = clock.get_pts();
+        } else {
+            clock_pts
+        };
         ui_state.current_pts = current_pts;
 
         // Check for end-of-file / loop
@@ -459,6 +274,8 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                 let (dec, gen) = start_decoders(&source, &geom, fps, 0.0);
                 ffmpeg_decoder = dec;
                 proc_generator = gen;
+                queued_frame = None;
+                current_frame = None;
                 let _ = audio.start(0.0);
                 continue;
             } else {
@@ -466,7 +283,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
             }
         }
 
-        // Receive frames from decoder
+        // Receive and Synchronize Video Frames
         let receiver = if let Some(dec) = &ffmpeg_decoder {
             Some(&dec.frame_receiver)
         } else if let Some(gen) = &proc_generator {
@@ -476,56 +293,321 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
         };
 
         if let Some(rx) = receiver {
-            while let Ok(frame) = rx.try_recv() {
-                let frame_pts = frame.pts_secs;
-                current_frame = Some(frame);
-
-                // If this frame is roughly at or slightly ahead of current pts, stop skipping
-                if frame_pts >= current_pts - (1.0 / fps) * 0.5 {
-                    break;
+            // Fill queued_frame if empty
+            if queued_frame.is_none() {
+                if let Ok(f) = rx.try_recv() {
+                    queued_frame = Some(f);
                 }
             }
         }
 
-        // 3. Render Current Frame to Buffer
-        if let Some(frame) = &current_frame {
-            buffer.clear();
-            buffer.push_str("\x1b[H"); // Cursor home
+        let mut needs_render = false;
 
-            match current_mode {
-                RenderMode::HalfBlock => render_half_block(frame, &geom, &lut, &mut buffer),
-                RenderMode::Braille => render_braille(frame, &geom, &lut, &mut buffer),
-                RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => {
-                    render_ascii(frame, &geom, &lut, current_mode, &mut buffer)
+        if let Some(f) = queued_frame.take() {
+            if f.pts_secs <= current_pts {
+                // Time to display this frame!
+                let mut best_frame = f;
+
+                // Frame-skipping: catch up if falling behind clock
+                if let Some(rx) = receiver {
+                    while best_frame.pts_secs < current_pts - frame_interval * 1.5 {
+                        if let Ok(next) = rx.try_recv() {
+                            best_frame = next;
+                        } else {
+                            break;
+                        }
+                    }
                 }
-            }
 
-            // Determine OSD visibility
-            let osd_visible = match osd_mode {
-                OsdMode::AlwaysOn => true,
-                OsdMode::Off => false,
-                OsdMode::AutoHide => {
-                    last_interaction.elapsed().as_secs_f32() < 3.0 || ui_state.is_paused
-                }
-            };
-
-            render_ui(&ui_state, cols, rows, osd_visible, &mut buffer);
-
-            // Write whole screen in single I/O burst
-            out.write_all(buffer.as_bytes())?;
-            out.flush()?;
-
-            frame_count += 1;
-            if fps_timer.elapsed() >= Duration::from_secs(1) {
-                let measured_fps = frame_count as f64 / fps_timer.elapsed().as_secs_f64();
-                ui_state.fps = measured_fps;
-                frame_count = 0;
-                fps_timer = Instant::now();
+                current_frame = Some(best_frame);
+                needs_render = true;
+            } else {
+                // Frame is in future, put it back
+                queued_frame = Some(f);
             }
         }
 
-        // Sleep to limit frame rate smoothly
-        let target_frame_time = Duration::from_secs_f64(1.0 / fps);
-        std::thread::sleep(Duration::from_millis(10).min(target_frame_time / 2));
+        // 1. Process Input Events
+        // Calculate dynamic wait time until next frame is due
+        let wait_duration = if clock.is_paused() {
+            Duration::from_millis(50)
+        } else if let Some(next) = &queued_frame {
+            let delay = (next.pts_secs - current_pts).max(0.001);
+            Duration::from_secs_f64(delay.min(frame_interval))
+        } else {
+            Duration::from_millis(4)
+        };
+
+        if event::poll(wait_duration)? {
+            while event::poll(Duration::from_millis(0))? {
+                let ev = event::read()?;
+                match ev {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        last_interaction = Instant::now();
+                        needs_render = true;
+                        match key.code {
+                            KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                            KeyCode::Char(' ') | KeyCode::Char('k') => {
+                                let paused = clock.toggle_pause();
+                                ui_state.is_paused = paused;
+                                if paused {
+                                    audio.pause();
+                                    ui_state.set_message("PAUSED");
+                                } else {
+                                    audio.resume();
+                                    ui_state.set_message("PLAYING");
+                                }
+                            }
+                            KeyCode::Right | KeyCode::Char('l') => {
+                                let new_pts = (clock.get_pts() + 5.0).min(meta.duration_secs.max(60000.0));
+                                clock.seek_to(new_pts);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                let _ = audio.start(new_pts);
+                                ui_state.set_message("+5s Seek");
+                            }
+                            KeyCode::Left | KeyCode::Char('j') => {
+                                let new_pts = (clock.get_pts() - 5.0).max(0.0);
+                                clock.seek_to(new_pts);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                let _ = audio.start(new_pts);
+                                ui_state.set_message("-5s Seek");
+                            }
+                            KeyCode::Char(']') | KeyCode::Char('>') => {
+                                let new_pts = (clock.get_pts() + 15.0).min(meta.duration_secs.max(60000.0));
+                                clock.seek_to(new_pts);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                let _ = audio.start(new_pts);
+                                ui_state.set_message("+15s Seek");
+                            }
+                            KeyCode::Char('[') | KeyCode::Char('<') => {
+                                let new_pts = (clock.get_pts() - 15.0).max(0.0);
+                                clock.seek_to(new_pts);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                let _ = audio.start(new_pts);
+                                ui_state.set_message("-15s Seek");
+                            }
+                            KeyCode::Char(c) if c.is_ascii_digit() && meta.duration_secs > 0.0 => {
+                                let frac = (c as u32 - '0' as u32) as f64 / 10.0;
+                                let new_pts = meta.duration_secs * frac;
+                                clock.seek_to(new_pts);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                let _ = audio.start(new_pts);
+                                ui_state.set_message(format!("Seek {:2.0}%", frac * 100.0));
+                            }
+                            KeyCode::Up | KeyCode::Char('+') | KeyCode::Char('=') => {
+                                let new_vol = (audio.get_volume() + 0.05).min(1.5);
+                                audio.set_volume(new_vol);
+                                ui_state.volume = new_vol;
+                                ui_state.set_message(format!("Volume {:3.0}%", new_vol * 100.0));
+                            }
+                            KeyCode::Down | KeyCode::Char('-') | KeyCode::Char('_') => {
+                                let new_vol = (audio.get_volume() - 0.05).max(0.0);
+                                audio.set_volume(new_vol);
+                                ui_state.volume = new_vol;
+                                ui_state.set_message(format!("Volume {:3.0}%", new_vol * 100.0));
+                            }
+                            KeyCode::Char('m') => {
+                                let muted = audio.toggle_mute();
+                                ui_state.is_muted = muted;
+                                ui_state.set_message(if muted { "Muted" } else { "Unmuted" });
+                            }
+                            KeyCode::Char('v') | KeyCode::Char('M') => {
+                                current_mode = current_mode.next();
+                                ui_state.render_mode = current_mode;
+                                let (px_c, px_r) = match current_mode {
+                                    RenderMode::HalfBlock => (1, 2),
+                                    RenderMode::Braille => (2, 4),
+                                    RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
+                                };
+                                geom = RenderGeometry::calculate(
+                                    cols,
+                                    rows.saturating_sub(1),
+                                    meta.width,
+                                    meta.height,
+                                    current_scaling,
+                                    px_c,
+                                    px_r,
+                                );
+                                let pts = clock.get_pts();
+                                let (dec, gen) = start_decoders(&source, &geom, fps, pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                ui_state.set_message(format!("Mode: {}", current_mode.name()));
+                            }
+                            KeyCode::Char('a') => {
+                                current_scaling = current_scaling.next();
+                                ui_state.scaling_mode = current_scaling;
+                                let (px_c, px_r) = match current_mode {
+                                    RenderMode::HalfBlock => (1, 2),
+                                    RenderMode::Braille => (2, 4),
+                                    RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
+                                };
+                                geom = RenderGeometry::calculate(
+                                    cols,
+                                    rows.saturating_sub(1),
+                                    meta.width,
+                                    meta.height,
+                                    current_scaling,
+                                    px_c,
+                                    px_r,
+                                );
+                                let pts = clock.get_pts();
+                                let (dec, gen) = start_decoders(&source, &geom, fps, pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                ui_state.set_message(format!("Aspect: {}", current_scaling.name()));
+                            }
+                            KeyCode::Char('f') => {
+                                current_filter = current_filter.next();
+                                ui_state.color_filter = current_filter;
+                                lut = ColorLut::new(brightness, contrast, invert, current_filter);
+                                ui_state.set_message(format!("Filter: {}", current_filter.name()));
+                            }
+                            KeyCode::Char('b') => {
+                                brightness = (brightness - 10).max(-100);
+                                ui_state.brightness = brightness;
+                                lut = ColorLut::new(brightness, contrast, invert, current_filter);
+                                ui_state.set_message(format!("Brightness: {}", brightness));
+                            }
+                            KeyCode::Char('B') => {
+                                brightness = (brightness + 10).min(100);
+                                ui_state.brightness = brightness;
+                                lut = ColorLut::new(brightness, contrast, invert, current_filter);
+                                ui_state.set_message(format!("Brightness: +{}", brightness));
+                            }
+                            KeyCode::Char('c') => {
+                                contrast = (contrast - 0.1).max(0.2);
+                                ui_state.contrast = contrast;
+                                lut = ColorLut::new(brightness, contrast, invert, current_filter);
+                                ui_state.set_message(format!("Contrast: {:.1}x", contrast));
+                            }
+                            KeyCode::Char('C') => {
+                                contrast = (contrast + 0.1).min(3.0);
+                                ui_state.contrast = contrast;
+                                lut = ColorLut::new(brightness, contrast, invert, current_filter);
+                                ui_state.set_message(format!("Contrast: {:.1}x", contrast));
+                            }
+                            KeyCode::Char('i') => {
+                                invert = !invert;
+                                ui_state.invert = invert;
+                                lut = ColorLut::new(brightness, contrast, invert, current_filter);
+                                ui_state.set_message(if invert { "Colors Inverted" } else { "Colors Normal" });
+                            }
+                            KeyCode::Char('r') => {
+                                brightness = 0;
+                                contrast = 1.0;
+                                invert = false;
+                                current_filter = ColorFilter::None;
+                                ui_state.brightness = brightness;
+                                ui_state.contrast = contrast;
+                                ui_state.invert = invert;
+                                ui_state.color_filter = current_filter;
+                                lut = ColorLut::new(brightness, contrast, invert, current_filter);
+                                ui_state.set_message("Adjustments Reset");
+                            }
+                            KeyCode::Char('p') | KeyCode::Char('L') => {
+                                is_looping = !is_looping;
+                                ui_state.is_looping = is_looping;
+                                ui_state.set_message(if is_looping { "Looping On" } else { "Looping Off" });
+                            }
+                            KeyCode::Tab | KeyCode::Char('o') => {
+                                osd_mode = osd_mode.next();
+                                ui_state.osd_mode = osd_mode;
+                                ui_state.set_message(match osd_mode {
+                                    OsdMode::AutoHide => "OSD: Auto-hide",
+                                    OsdMode::AlwaysOn => "OSD: Always Visible",
+                                    OsdMode::Off => "OSD: Hidden",
+                                });
+                            }
+                            KeyCode::Char('?') | KeyCode::Char('h') => {
+                                ui_state.show_help = !ui_state.show_help;
+                            }
+                            _ => {}
+                        }
+                    }
+                    Event::Resize(new_cols, new_rows) => {
+                        cols = new_cols;
+                        rows = new_rows;
+                        let (px_c, px_r) = match current_mode {
+                            RenderMode::HalfBlock => (1, 2),
+                            RenderMode::Braille => (2, 4),
+                            RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
+                        };
+                        geom = RenderGeometry::calculate(
+                            cols,
+                            rows.saturating_sub(1),
+                            meta.width,
+                            meta.height,
+                            current_scaling,
+                            px_c,
+                            px_r,
+                        );
+                        let pts = clock.get_pts();
+                        let (dec, gen) = start_decoders(&source, &geom, fps, pts);
+                        ffmpeg_decoder = dec;
+                        proc_generator = gen;
+                        queued_frame = None;
+                        needs_render = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Render Frame to Buffer if updated
+        if needs_render {
+            if let Some(frame) = &current_frame {
+                buffer.clear();
+                buffer.push_str("\x1b[H"); // Cursor home
+
+                match current_mode {
+                    RenderMode::HalfBlock => render_half_block(frame, &geom, &lut, &mut buffer),
+                    RenderMode::Braille => render_braille(frame, &geom, &lut, &mut buffer),
+                    RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => {
+                        render_ascii(frame, &geom, &lut, current_mode, &mut buffer)
+                    }
+                }
+
+                // Determine OSD visibility
+                let osd_visible = match osd_mode {
+                    OsdMode::AlwaysOn => true,
+                    OsdMode::Off => false,
+                    OsdMode::AutoHide => {
+                        last_interaction.elapsed().as_secs_f32() < 3.0 || ui_state.is_paused
+                    }
+                };
+
+                render_ui(&ui_state, cols, rows, osd_visible, &mut buffer);
+
+                // Write whole screen in single I/O burst
+                out.write_all(buffer.as_bytes())?;
+                out.flush()?;
+
+                frame_count += 1;
+                if fps_timer.elapsed() >= Duration::from_secs(1) {
+                    let measured_fps = frame_count as f64 / fps_timer.elapsed().as_secs_f64();
+                    ui_state.fps = measured_fps;
+                    frame_count = 0;
+                    fps_timer = Instant::now();
+                }
+            }
+        }
     }
 }

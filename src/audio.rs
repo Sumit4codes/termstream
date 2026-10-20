@@ -1,6 +1,6 @@
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -13,15 +13,22 @@ pub struct PcmSource {
     current_sample: i16,
     sample_rate: u32,
     channels: u16,
+    samples_played: Arc<AtomicU64>,
 }
 
 impl PcmSource {
-    pub fn new(receiver: Receiver<i16>, sample_rate: u32, channels: u16) -> Self {
+    pub fn new(
+        receiver: Receiver<i16>,
+        sample_rate: u32,
+        channels: u16,
+        samples_played: Arc<AtomicU64>,
+    ) -> Self {
         Self {
             receiver,
             current_sample: 0,
             sample_rate,
             channels,
+            samples_played,
         }
     }
 }
@@ -33,6 +40,7 @@ impl Iterator for PcmSource {
         match self.receiver.recv_timeout(Duration::from_millis(50)) {
             Ok(s) => {
                 self.current_sample = s;
+                self.samples_played.fetch_add(1, Ordering::Relaxed);
                 Some(s)
             }
             Err(_) => {
@@ -68,6 +76,8 @@ pub struct AudioPlayer {
     child: Option<Child>,
     stop_signal: Arc<AtomicBool>,
     sender: Option<Sender<i16>>,
+    samples_played: Arc<AtomicU64>,
+    base_seek_ms: Arc<AtomicU64>,
     path: String,
     volume: f32,
     is_muted: bool,
@@ -76,6 +86,9 @@ pub struct AudioPlayer {
 
 impl AudioPlayer {
     pub fn new(path: String, enabled: bool) -> Self {
+        let samples_played = Arc::new(AtomicU64::new(0));
+        let base_seek_ms = Arc::new(AtomicU64::new(0));
+
         if !enabled {
             return Self {
                 _stream: None,
@@ -84,6 +97,8 @@ impl AudioPlayer {
                 child: None,
                 stop_signal: Arc::new(AtomicBool::new(false)),
                 sender: None,
+                samples_played,
+                base_seek_ms,
                 path,
                 volume: 1.0,
                 is_muted: false,
@@ -106,6 +121,8 @@ impl AudioPlayer {
             child: None,
             stop_signal: Arc::new(AtomicBool::new(false)),
             sender: None,
+            samples_played,
+            base_seek_ms,
             path,
             volume: 1.0,
             is_muted: false,
@@ -122,6 +139,10 @@ impl AudioPlayer {
 
         let stop_signal = Arc::new(AtomicBool::new(false));
         self.stop_signal = Arc::clone(&stop_signal);
+
+        self.base_seek_ms
+            .store((seek_secs * 1000.0) as u64, Ordering::SeqCst);
+        self.samples_played.store(0, Ordering::SeqCst);
 
         let (tx, rx) = bounded::<i16>(44100 * 4); // ~2 seconds of buffer
         self.sender = Some(tx.clone());
@@ -147,7 +168,7 @@ impl AudioPlayer {
         let mut child = cmd.spawn().context("Failed to spawn ffmpeg audio decoder")?;
         let mut stdout = child.stdout.take().context("Failed to take audio stdout")?;
 
-        let source = PcmSource::new(rx, 44100, 2);
+        let source = PcmSource::new(rx, 44100, 2, Arc::clone(&self.samples_played));
         if let Some(sink) = &self.sink {
             sink.append(source);
             sink.set_volume(if self.is_muted { 0.0 } else { self.volume });
@@ -177,6 +198,17 @@ impl AudioPlayer {
 
         self.child = Some(child);
         Ok(())
+    }
+
+    pub fn current_pts(&self) -> Option<f64> {
+        if !self.enabled || self.sink.is_none() {
+            return None;
+        }
+        let samples = self.samples_played.load(Ordering::Relaxed);
+        let base_ms = self.base_seek_ms.load(Ordering::Relaxed);
+        // Stereo: 2 samples per audio frame at 44100 Hz
+        let audio_secs = samples as f64 / (44100.0 * 2.0);
+        Some((base_ms as f64 / 1000.0) + audio_secs)
     }
 
     pub fn set_volume(&mut self, vol: f32) {

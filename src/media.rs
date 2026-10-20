@@ -13,20 +13,35 @@ pub struct MediaProbe;
 
 impl MediaProbe {
     pub fn probe(path: &str) -> Result<MediaMetadata> {
+        let trimmed_path = path.trim();
+        if !trimmed_path.starts_with("http://")
+            && !trimmed_path.starts_with("https://")
+            && !trimmed_path.starts_with("rtsp://")
+            && !trimmed_path.starts_with("/dev/")
+            && !std::path::Path::new(trimmed_path).exists()
+        {
+            anyhow::bail!("Video file not found: '{}'", path);
+        }
+
         let output = Command::new("ffprobe")
             .args([
-                "-v", "quiet",
+                "-v", "error",
                 "-print_format", "json",
                 "-show_format",
                 "-show_streams",
-                path,
+                trimmed_path,
             ])
             .output()
             .context("Failed to run ffprobe. Ensure ffmpeg and ffprobe are installed.")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("ffprobe failed: {}", stderr);
+            let msg = if stderr.trim().is_empty() {
+                format!("Failed to probe '{}'. Verify file format and permissions.", path)
+            } else {
+                stderr.trim().to_string()
+            };
+            anyhow::bail!("ffprobe failed: {}", msg);
         }
 
         let json: Value = serde_json::from_slice(&output.stdout)
