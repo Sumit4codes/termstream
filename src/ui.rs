@@ -187,7 +187,7 @@ fn render_help_modal(cols: u16, rows: u16, buffer: &mut String) {
         "  0 .. 9           Seek to 0% .. 90%",
         "  Up / Down        Volume Up / Down (10%)",
         "  m                Toggle Mute",
-        "  M                Cycle Render Mode (Block/Braille/ASCII)",
+        "  M                Cycle Render Mode (Block/Quad/Braille/ASCII)",
         "  a                Cycle Aspect Ratio (Fit/Fill/Stretch)",
         "  f                Cycle Color Filter (Green/Amber/Cyan/Mono)",
         "  b / B            Adjust Brightness (- / +)",

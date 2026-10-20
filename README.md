@@ -7,11 +7,13 @@ A high-performance, feature-complete terminal video player built from scratch in
 ## ✨ Features
 
 - **Blazing Fast Native Rendering**:
+  - **Quadrant Mode (`▘▝▖▗`)**: Solid 2x2 pixels per cell (doubles horizontal resolution) using Unicode quadrant blocks with ANSI 24-bit TrueColor foreground and background.
   - **Half-Block Mode (`▀`)**: Displays 2 vertical pixels per character cell using ANSI 24-bit TrueColor foreground and background. Doubles the vertical resolution with square pixel aspect ratios.
-  - **Braille 2x4 Matrix (`⠋⠙⠸`)**: 8 dots per cell (2 horizontal × 4 vertical dots) using Unicode Braille with 2x4 Bayer matrix dithering and TrueColor tinting for ultra-high-resolution matrix rendering.
+  - **Braille 2x4 Matrix (`⠋⠙⠸`)**: 8 subpixel dots per cell (2 horizontal × 4 vertical dots) with adaptive edge-preserving contrast thresholding and TrueColor tinting for ultra-high-resolution detail.
   - **Unicode Block Shades (` ░▒▓█`)**: High-contrast textured luminance shading.
   - **ASCII Density Ramp (`@%#*+=-:. `)**: Classic retro terminal aesthetic.
   - **Retro Phosphor CRT Filters**: Matrix Green CRT, Amber CRT, Cyberpunk Cyan, and Monochrome Grayscale.
+  - **Dynamic Resolution Scaling**: Automatically senses terminal font zoom (e.g. `Ctrl` + `-`) and window resizing to immediately scale video decoding to the full high-resolution grid.
 
 - **Audio-Video Synchronization (A/V Sync)**:
   - Monotonic master clock with automatic drift compensation and dynamic frame-skipping when terminal I/O latency occurs.
@@ -78,6 +80,9 @@ termstream --test
 # Play local video file
 termstream /path/to/movie.mp4
 
+# Play in high-resolution Quadrant 2x2 mode
+termstream -m quadrant /path/to/movie.mp4
+
 # Play in Braille matrix mode
 termstream -m braille /path/to/movie.mp4
 
@@ -112,7 +117,7 @@ termstream --info /path/to/movie.mp4
 | <kbd>↑</kbd> / <kbd>+</kbd> | Volume up 10% (up to 300%) |
 | <kbd>↓</kbd> / <kbd>-</kbd> | Volume down 10% |
 | <kbd>m</kbd> | Toggle Mute |
-| <kbd>v</kbd> / <kbd>M</kbd> | Cycle Render Mode (Half-Block → Braille → Shades → ASCII → Mono) |
+| <kbd>v</kbd> / <kbd>M</kbd> | Cycle Render Mode (Half-Block → Quadrant → Braille → Shades → ASCII → Mono) |
 | <kbd>a</kbd> | Cycle Aspect Ratio (Fit → Fill → Stretch) |
 | <kbd>f</kbd> | Cycle Color Filter (Normal → Matrix Green → Amber CRT → Cyan → Grayscale) |
 | <kbd>b</kbd> / <kbd>B</kbd> | Decrease / Increase Brightness |
