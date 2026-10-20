@@ -15,6 +15,14 @@ pub enum RenderMode {
 }
 
 impl RenderMode {
+    pub fn subpixels(&self) -> (u32, u32) {
+        match self {
+            RenderMode::HalfBlock => (1, 2),
+            RenderMode::Braille => (2, 4),
+            RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
+        }
+    }
+
     pub fn next(&self) -> Self {
         match self {
             RenderMode::HalfBlock => RenderMode::Braille,

@@ -195,11 +195,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
     };
 
     // Calculate pixel dimensions needed for current mode
-    let (px_per_col, px_per_row) = match current_mode {
-        RenderMode::HalfBlock => (1, 2),
-        RenderMode::Braille => (2, 4),
-        RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
-    };
+    let (px_per_col, px_per_row) = current_mode.subpixels();
 
     let mut geom = RenderGeometry::calculate(
         cols,
@@ -266,6 +262,33 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
             clock_pts
         };
         ui_state.current_pts = current_pts;
+        let mut needs_render = false;
+
+        // Periodically verify terminal size in case resize event was missed by terminal (e.g. font zoom in/out)
+        if let Ok((curr_cols, curr_rows)) = terminal_size() {
+            if curr_cols > 0 && curr_rows > 0 && (curr_cols != cols || curr_rows != rows) {
+                cols = curr_cols;
+                rows = curr_rows;
+                let (px_c, px_r) = current_mode.subpixels();
+                geom = RenderGeometry::calculate(
+                    cols,
+                    rows.saturating_sub(1),
+                    meta.width,
+                    meta.height,
+                    current_scaling,
+                    px_c,
+                    px_r,
+                );
+                let pts = clock.get_pts();
+                let (dec, gen) = start_decoders(&source, &geom, fps, pts);
+                ffmpeg_decoder = dec;
+                proc_generator = gen;
+                queued_frame = None;
+                current_frame = None;
+                let _ = execute!(out, crossterm::terminal::Clear(crossterm::terminal::ClearType::All));
+                needs_render = true;
+            }
+        }
 
         // Check for end-of-file / loop
         if meta.duration_secs > 0.0 && current_pts >= meta.duration_secs {
@@ -300,8 +323,6 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                 }
             }
         }
-
-        let mut needs_render = false;
 
         if let Some(f) = queued_frame.take() {
             if f.pts_secs <= current_pts {
@@ -429,11 +450,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                             KeyCode::Char('v') | KeyCode::Char('M') => {
                                 current_mode = current_mode.next();
                                 ui_state.render_mode = current_mode;
-                                let (px_c, px_r) = match current_mode {
-                                    RenderMode::HalfBlock => (1, 2),
-                                    RenderMode::Braille => (2, 4),
-                                    RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
-                                };
+                                let (px_c, px_r) = current_mode.subpixels();
                                 geom = RenderGeometry::calculate(
                                     cols,
                                     rows.saturating_sub(1),
@@ -448,16 +465,14 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                                 ffmpeg_decoder = dec;
                                 proc_generator = gen;
                                 queued_frame = None;
+                                current_frame = None;
+                                let _ = execute!(out, crossterm::terminal::Clear(crossterm::terminal::ClearType::All));
                                 ui_state.set_message(format!("Mode: {}", current_mode.name()));
                             }
                             KeyCode::Char('a') => {
                                 current_scaling = current_scaling.next();
                                 ui_state.scaling_mode = current_scaling;
-                                let (px_c, px_r) = match current_mode {
-                                    RenderMode::HalfBlock => (1, 2),
-                                    RenderMode::Braille => (2, 4),
-                                    RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
-                                };
+                                let (px_c, px_r) = current_mode.subpixels();
                                 geom = RenderGeometry::calculate(
                                     cols,
                                     rows.saturating_sub(1),
@@ -472,6 +487,8 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                                 ffmpeg_decoder = dec;
                                 proc_generator = gen;
                                 queued_frame = None;
+                                current_frame = None;
+                                let _ = execute!(out, crossterm::terminal::Clear(crossterm::terminal::ClearType::All));
                                 ui_state.set_message(format!("Aspect: {}", current_scaling.name()));
                             }
                             KeyCode::Char('f') => {
@@ -545,11 +562,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                     Event::Resize(new_cols, new_rows) => {
                         cols = new_cols;
                         rows = new_rows;
-                        let (px_c, px_r) = match current_mode {
-                            RenderMode::HalfBlock => (1, 2),
-                            RenderMode::Braille => (2, 4),
-                            RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
-                        };
+                        let (px_c, px_r) = current_mode.subpixels();
                         geom = RenderGeometry::calculate(
                             cols,
                             rows.saturating_sub(1),
@@ -564,6 +577,8 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                         ffmpeg_decoder = dec;
                         proc_generator = gen;
                         queued_frame = None;
+                        current_frame = None;
+                        let _ = execute!(out, crossterm::terminal::Clear(crossterm::terminal::ClearType::All));
                         needs_render = true;
                     }
                     _ => {}
