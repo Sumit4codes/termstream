@@ -4,6 +4,8 @@ use clap::ValueEnum;
 pub enum RenderMode {
     /// 2 vertical pixels per character cell using unicode half blocks (▀) with 24-bit TrueColor
     HalfBlock,
+    /// 2x2 solid pixels per character cell using Unicode quadrant blocks (▘▝▖▗) with 24-bit TrueColor
+    Quadrant,
     /// 2x4 dots per character cell using unicode Braille patterns with TrueColor
     Braille,
     /// Density shading using Unicode block characters ( ░▒▓█) with TrueColor
@@ -18,6 +20,7 @@ impl RenderMode {
     pub fn subpixels(&self) -> (u32, u32) {
         match self {
             RenderMode::HalfBlock => (1, 2),
+            RenderMode::Quadrant => (2, 2),
             RenderMode::Braille => (2, 4),
             RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
         }
@@ -25,7 +28,8 @@ impl RenderMode {
 
     pub fn next(&self) -> Self {
         match self {
-            RenderMode::HalfBlock => RenderMode::Braille,
+            RenderMode::HalfBlock => RenderMode::Quadrant,
+            RenderMode::Quadrant => RenderMode::Braille,
             RenderMode::Braille => RenderMode::Shades,
             RenderMode::Shades => RenderMode::Ascii,
             RenderMode::Ascii => RenderMode::Mono,
@@ -36,6 +40,7 @@ impl RenderMode {
     pub fn name(&self) -> &'static str {
         match self {
             RenderMode::HalfBlock => "Half-Block (TrueColor ▀)",
+            RenderMode::Quadrant => "Quadrant 2x2 Hi-Res (▘▝▖▗)",
             RenderMode::Braille => "Braille 2x4 Matrix (⠓⠸)",
             RenderMode::Shades => "Unicode Shades ( ░▒▓█)",
             RenderMode::Ascii => "ASCII Ramp (@%#*+=-:. )",

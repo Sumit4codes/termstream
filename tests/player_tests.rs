@@ -2,6 +2,7 @@ use termstream::clock::Clock;
 use termstream::render::ascii::render_ascii;
 use termstream::render::braille::render_braille;
 use termstream::render::half_block::render_half_block;
+use termstream::render::quadrant::render_quadrant;
 use termstream::render::{ColorLut, RenderGeometry};
 use termstream::types::{ColorFilter, RenderMode, ScalingMode, VideoFrame};
 use termstream::ui::format_time;
@@ -75,6 +76,29 @@ fn test_render_half_block_output() {
     assert!(buffer.contains('▀'));
     assert!(buffer.contains("\x1b[38;2;"));
     assert!(buffer.contains("\x1b[48;2;"));
+}
+
+#[test]
+fn test_render_quadrant_output() {
+    let geom = RenderGeometry::calculate(10, 5, 20, 10, ScalingMode::Stretch, 2, 2);
+    let lut = ColorLut::new(0, 1.0, false, ColorFilter::None);
+
+    let mut data = vec![0u8; 20 * 10 * 3];
+    // Fill top-left subpixel of each cell with bright green (0, 255, 0)
+    data[0 + 1] = 255;
+
+    let frame = VideoFrame {
+        width: 20,
+        height: 10,
+        pts_secs: 0.0,
+        data,
+    };
+
+    let mut buffer = String::new();
+    render_quadrant(&frame, &geom, &lut, &mut buffer);
+
+    assert!(!buffer.is_empty());
+    assert!(buffer.contains("\x1b[38;2;"));
 }
 
 #[test]

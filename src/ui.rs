@@ -124,6 +124,7 @@ pub fn render_ui(
     // Mode badges
     let mode_badge = match state.render_mode {
         RenderMode::HalfBlock => "\x1b[38;2;100;220;255mBLOCK",
+        RenderMode::Quadrant => "\x1b[38;2;120;255;200mQUAD",
         RenderMode::Braille => "\x1b[38;2;180;120;255mBRAILLE",
         RenderMode::Shades => "\x1b[38;2;255;160;100mSHADE",
         RenderMode::Ascii => "\x1b[38;2;140;255;140mASCII",

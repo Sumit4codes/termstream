@@ -18,7 +18,7 @@ use termstream::generator::{ProceduralGenerator, TestPattern};
 use termstream::media::{MediaProbe, VideoStreamDecoder};
 use termstream::render::{
     ascii::render_ascii, braille::render_braille, half_block::render_half_block,
-    ColorLut, RenderGeometry,
+    quadrant::render_quadrant, ColorLut, RenderGeometry,
 };
 use termstream::types::{ColorFilter, MediaMetadata, OsdMode, RenderMode, ScalingMode, VideoFrame};
 use termstream::ui::{self, render_ui, UiState};
@@ -594,6 +594,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
 
                 match current_mode {
                     RenderMode::HalfBlock => render_half_block(frame, &geom, &lut, &mut buffer),
+                    RenderMode::Quadrant => render_quadrant(frame, &geom, &lut, &mut buffer),
                     RenderMode::Braille => render_braille(frame, &geom, &lut, &mut buffer),
                     RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => {
                         render_ascii(frame, &geom, &lut, current_mode, &mut buffer)

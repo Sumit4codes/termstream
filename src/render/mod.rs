@@ -1,4 +1,5 @@
 pub mod half_block;
+pub mod quadrant;
 pub mod braille;
 pub mod ascii;
 
@@ -109,49 +110,43 @@ impl RenderGeometry {
             };
         }
 
-        let total_pixel_w = term_cols as f64 * pixels_per_col as f64;
-        let total_pixel_h = term_rows as f64 * pixels_per_row as f64;
         let video_ar = video_w as f64 / video_h as f64;
-        // Typical terminal char aspect ratio: cell width / cell height ~= 0.5.
-        // If pixels_per_col = 1 and pixels_per_row = 2, pixel aspect ratio is 1.0!
-        let canvas_ar = total_pixel_w / total_pixel_h;
+        // Physical terminal character cell aspect ratio: cell width / cell height ~= 0.5.
+        // Therefore, physical canvas aspect ratio is (term_cols / term_rows) * 0.5.
+        let canvas_ar = (term_cols as f64 / term_rows as f64) * 0.5;
 
-        let (target_pixel_w, target_pixel_h) = match scaling {
-            ScalingMode::Stretch => (total_pixel_w, total_pixel_h),
+        let (target_cols, target_rows) = match scaling {
+            ScalingMode::Stretch => (term_cols as f64, term_rows as f64),
             ScalingMode::Fit => {
                 if canvas_ar > video_ar {
                     // Pillarbox: video is narrower than terminal
-                    let h = total_pixel_h;
-                    let w = h * video_ar;
-                    (w, h)
+                    let r = term_rows as f64;
+                    let c = (r * video_ar) / 0.5;
+                    (c, r)
                 } else {
                     // Letterbox: video is wider than terminal
-                    let w = total_pixel_w;
-                    let h = w / video_ar;
-                    (w, h)
+                    let c = term_cols as f64;
+                    let r = (c * 0.5) / video_ar;
+                    (c, r)
                 }
             }
             ScalingMode::Fill => {
                 if canvas_ar > video_ar {
                     // Crop top/bottom
-                    let w = total_pixel_w;
-                    let h = w / video_ar;
-                    (w, h)
+                    let c = term_cols as f64;
+                    let r = (c * 0.5) / video_ar;
+                    (c, r)
                 } else {
                     // Crop left/right
-                    let h = total_pixel_h;
-                    let w = h * video_ar;
-                    (w, h)
+                    let r = term_rows as f64;
+                    let c = (r * video_ar) / 0.5;
+                    (c, r)
                 }
             }
         };
 
-        let pixel_w = (target_pixel_w.round() as u32).max(pixels_per_col);
-        let pixel_h = (target_pixel_h.round() as u32).max(pixels_per_row);
-
-        // Snap pixel dimensions to cell boundaries
-        let active_cols = ((pixel_w as f64 / pixels_per_col as f64).round() as u16).min(term_cols);
-        let active_rows = ((pixel_h as f64 / pixels_per_row as f64).round() as u16).min(term_rows);
+        let active_cols = ((target_cols.round() as u16).max(1)).min(term_cols);
+        let active_rows = ((target_rows.round() as u16).max(1)).min(term_rows);
 
         let final_pixel_w = active_cols as u32 * pixels_per_col;
         let final_pixel_h = active_rows as u32 * pixels_per_row;
