@@ -1,9 +1,12 @@
 use std::fmt::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use crate::render::{ColorLut, RenderGeometry};
 use crate::types::VideoFrame;
 
 const B64_CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const CHUNK_RAW_SIZE: usize = 3072; // 3072 raw bytes -> exactly 4096 base64 chars (Kitty max chunk size)
+
+static KITTY_TOGGLE: AtomicBool = AtomicBool::new(false);
 
 /// Fast Base64 chunk encoder writing directly into String buffer
 #[inline(always)]
@@ -41,7 +44,7 @@ fn encode_b64_chunk(raw: &[u8], out: &mut String) {
     }
 }
 
-/// Render video frame using the Kitty Graphics Protocol (direct 24-bit RGB TrueColor)
+/// Render video frame using the Kitty Graphics Protocol with atomic double buffering and in-place placement replacement
 pub fn render_kitty(
     frame: &VideoFrame,
     geom: &RenderGeometry,
@@ -59,8 +62,11 @@ pub fn render_kitty(
     let row = geom.offset_rows + 1;
     let col = geom.offset_cols + 1;
 
-    // Delete previous frame placement with ID 1 to avoid unbounded placement accumulation
-    buffer.push_str("\x1b_Ga=d,d=i,i=1\x1b\\");
+    // Ping-pong double buffering: display new frame FIRST, then delete old frame
+    // This completely eliminates blinking/flickering because the screen is never left blank
+    let toggle = KITTY_TOGGLE.fetch_xor(true, Ordering::Relaxed);
+    let curr_id: u32 = if toggle { 1 } else { 2 };
+    let prev_id: u32 = if toggle { 2 } else { 1 };
 
     // Move cursor to top-left of active video region
     let _ = write!(buffer, "\x1b[{};{}H", row, col);
@@ -92,11 +98,11 @@ pub fn render_kitty(
     let num_chunks = (total_bytes + CHUNK_RAW_SIZE - 1) / CHUNK_RAW_SIZE;
 
     if num_chunks <= 1 {
-        // Fits entirely in a single chunk
+        // Fits entirely in a single chunk: use placement ID p=1 for flicker-free in-place replacement
         let _ = write!(
             buffer,
-            "\x1b_Ga=T,f=24,s={},v={},c={},r={},z=-1,q=2,i=1,m=0;",
-            w, h, act_cols, act_rows
+            "\x1b_Ga=T,f=24,s={},v={},c={},r={},z=-1,q=2,i={},p=1,m=0;",
+            w, h, act_cols, act_rows, curr_id
         );
         encode_b64_chunk(pixel_bytes, buffer);
         buffer.push_str("\x1b\\");
@@ -111,8 +117,8 @@ pub fn render_kitty(
             if chunk_idx == 0 {
                 let _ = write!(
                     buffer,
-                    "\x1b_Ga=T,f=24,s={},v={},c={},r={},z=-1,q=2,i=1,m=1;",
-                    w, h, act_cols, act_rows
+                    "\x1b_Ga=T,f=24,s={},v={},c={},r={},z=-1,q=2,i={},p=1,m=1;",
+                    w, h, act_cols, act_rows, curr_id
                 );
             } else {
                 let _ = write!(buffer, "\x1b_Gm={};", if is_last { 0 } else { 1 });
@@ -122,4 +128,7 @@ pub fn render_kitty(
             buffer.push_str("\x1b\\");
         }
     }
+
+    // Free the previous image's texture from the terminal's RAM now that the new frame is active
+    let _ = write!(buffer, "\x1b_Ga=d,d=i,i={}\x1b\\", prev_id);
 }

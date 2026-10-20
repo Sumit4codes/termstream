@@ -88,8 +88,8 @@ struct TerminalCleanup;
 impl Drop for TerminalCleanup {
     fn drop(&mut self) {
         let mut out = stdout();
-        // Clear any active Kitty graphics placements
-        let _ = write!(out, "\x1b_Ga=d,d=a\x1b\\");
+        // Clear sync mode and any active Kitty graphics placements
+        let _ = write!(out, "\x1b[?2026l\x1b_Ga=d,d=a\x1b\\");
         let _ = execute!(out, Show, LeaveAlternateScreen);
         let _ = disable_raw_mode();
         let _ = out.flush();
@@ -657,7 +657,8 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
         if needs_render {
             if let Some(frame) = &current_frame {
                 buffer.clear();
-                buffer.push_str("\x1b[H"); // Cursor home
+                buffer.push_str("\x1b[?2026h"); // Begin atomic synchronized update
+                buffer.push_str("\x1b[H");      // Cursor home
 
                 match current_mode {
                     RenderMode::HalfBlock => render_half_block(frame, &geom, &lut, &mut buffer),
@@ -680,6 +681,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                 };
 
                 render_ui(&ui_state, cols, rows, osd_visible, &mut buffer);
+                buffer.push_str("\x1b[?2026l"); // End atomic synchronized update (flush frame)
 
                 // Write whole screen in single I/O burst
                 out.write_all(buffer.as_bytes())?;

@@ -325,12 +325,13 @@ fn test_render_kitty_output() {
     let mut buffer = String::new();
     render_kitty(&frame, &geom, &lut, &mut buffer);
 
-    // Verify deletion of previous placement
-    assert!(buffer.contains("\x1b_Ga=d,d=i,i=1\x1b\\"));
     // Verify cursor positioning at offset (row 2, col 3)
     assert!(buffer.contains("\x1b[2;3H"));
-    // Verify transmit and display command
-    assert!(buffer.contains("a=T,f=24,s=16,v=16,c=16,r=16,z=-1,q=2,i=1"));
+    // Verify transmit and display command with placement replacement p=1
+    assert!(buffer.contains("a=T,f=24,s=16,v=16,c=16,r=16,z=-1,q=2"));
+    assert!(buffer.contains("p=1"));
+    // Verify clean deletion of previous double-buffered frame to prevent RAM accumulation
+    assert!(buffer.contains("\x1b_Ga=d,d=i,i="));
     // Verify clean APC termination
     assert!(buffer.ends_with("\x1b\\"));
 }
@@ -405,8 +406,8 @@ fn test_render_modes_pixel_cycle() {
     let loop_back = m7.next();
     assert_eq!(loop_back, RenderMode::HalfBlock);
 
-    assert_eq!(RenderMode::Kitty.subpixels(), (8, 16));
-    assert_eq!(RenderMode::Sixel.subpixels(), (6, 12));
+    assert_eq!(RenderMode::Kitty.subpixels(), (4, 8));
+    assert_eq!(RenderMode::Sixel.subpixels(), (3, 6));
     assert!(RenderMode::Kitty.name().contains("Kitty Pixel Graphics"));
     assert!(RenderMode::Sixel.name().contains("Sixel Pixel Graphics"));
 }

@@ -27,8 +27,8 @@ impl RenderMode {
             RenderMode::Quadrant => (2, 2),
             RenderMode::Braille => (2, 4),
             RenderMode::Shades | RenderMode::Ascii | RenderMode::Mono => (1, 2),
-            RenderMode::Kitty => (8, 16),
-            RenderMode::Sixel => (6, 12),
+            RenderMode::Kitty => (4, 8),
+            RenderMode::Sixel => (3, 6),
         }
     }
 
