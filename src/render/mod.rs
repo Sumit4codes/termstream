@@ -90,6 +90,43 @@ impl ColorLut {
     }
 }
 
+#[inline(always)]
+pub fn push_u8_str(buf: &mut String, mut n: u8) {
+    if n >= 100 {
+        buf.push((b'0' + n / 100) as char);
+        n %= 100;
+        buf.push((b'0' + n / 10) as char);
+        buf.push((b'0' + n % 10) as char);
+    } else if n >= 10 {
+        buf.push((b'0' + n / 10) as char);
+        buf.push((b'0' + n % 10) as char);
+    } else {
+        buf.push((b'0' + n) as char);
+    }
+}
+
+#[inline(always)]
+pub fn append_fg_rgb(buf: &mut String, r: u8, g: u8, b: u8) {
+    buf.push_str("\x1b[38;2;");
+    push_u8_str(buf, r);
+    buf.push(';');
+    push_u8_str(buf, g);
+    buf.push(';');
+    push_u8_str(buf, b);
+    buf.push('m');
+}
+
+#[inline(always)]
+pub fn append_bg_rgb(buf: &mut String, r: u8, g: u8, b: u8) {
+    buf.push_str("\x1b[48;2;");
+    push_u8_str(buf, r);
+    buf.push(';');
+    push_u8_str(buf, g);
+    buf.push(';');
+    push_u8_str(buf, b);
+    buf.push('m');
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RenderGeometry {
     pub canvas_cols: u16,

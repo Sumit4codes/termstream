@@ -18,6 +18,7 @@ pub struct UiState {
     pub show_help: bool,
     pub osd_mode: OsdMode,
     pub message: Option<(String, std::time::Instant)>,
+    pub jump_prompt: Option<String>,
 }
 
 impl UiState {
@@ -39,6 +40,67 @@ pub fn format_time(secs: f64) -> String {
     }
 }
 
+pub fn parse_timestamp(input: &str, duration: f64) -> Option<f64> {
+    let s = input.trim();
+    if s.is_empty() {
+        return None;
+    }
+
+    // Percentage: "50%" or "50 %"
+    if let Some(pct_str) = s.strip_suffix('%') {
+        let pct = pct_str.trim().parse::<f64>().ok()?;
+        if duration > 0.0 {
+            return Some((duration * (pct / 100.0)).clamp(0.0, duration));
+        } else {
+            return None;
+        }
+    }
+
+    // HH:MM:SS or MM:SS
+    if s.contains(':') {
+        let parts: Vec<&str> = s.split(':').map(|p| p.trim()).collect();
+        match parts.len() {
+            2 => {
+                let mins = parts[0].parse::<f64>().ok()?;
+                let secs = parts[1].parse::<f64>().ok()?;
+                let total = mins * 60.0 + secs;
+                return Some(if duration > 0.0 { total.clamp(0.0, duration) } else { total.max(0.0) });
+            }
+            3 => {
+                let hours = parts[0].parse::<f64>().ok()?;
+                let mins = parts[1].parse::<f64>().ok()?;
+                let secs = parts[2].parse::<f64>().ok()?;
+                let total = hours * 3600.0 + mins * 60.0 + secs;
+                return Some(if duration > 0.0 { total.clamp(0.0, duration) } else { total.max(0.0) });
+            }
+            _ => return None,
+        }
+    }
+
+    // Plain seconds, optionally with 's': "90" or "90s"
+    let clean = s.trim_end_matches('s').trim();
+    if let Ok(secs) = clean.parse::<f64>() {
+        return Some(if duration > 0.0 { secs.clamp(0.0, duration) } else { secs.max(0.0) });
+    }
+
+    None
+}
+
+pub fn progress_bar_cols(cols: u16, current_pts: f64, duration: f64) -> (u16, u16) {
+    let play_icon_len = 9;
+    let curr_str = format_time(current_pts);
+    let dur_str = if duration > 0.0 {
+        format_time(duration)
+    } else {
+        "--:--".to_string()
+    };
+    let time_len = curr_str.chars().count() + 3 + dur_str.chars().count();
+    let bar_start = (play_icon_len + time_len + 2) as u16; // 0-indexed column of '['
+    let bar_width = (cols as usize).saturating_sub(65).clamp(10, 40) as u16;
+    let bar_end = bar_start + bar_width + 1; // 0-indexed column of ']'
+    (bar_start, bar_end)
+}
+
 pub fn render_ui(
     state: &UiState,
     cols: u16,
@@ -56,6 +118,28 @@ pub fn render_ui(
         return;
     }
 
+    // Render Jump-To-Time interactive prompt if active
+    if let Some(input) = &state.jump_prompt {
+        let bar_row = rows;
+        let prompt_prefix = " ⏱ JUMP TO TIME (e.g. 1:23, 90s, 50%): ";
+        let _ = write!(
+            buffer,
+            "\x1b[{};1H\x1b[48;2;28;34;50m\x1b[1;38;2;255;210;60m{}",
+            bar_row, prompt_prefix
+        );
+        let _ = write!(buffer, "\x1b[1;38;2;255;255;255m{}█\x1b[0m", input);
+        let used_len = prompt_prefix.chars().count() + input.chars().count() + 1;
+        if (cols as usize) > used_len {
+            let pad = (cols as usize) - used_len;
+            let _ = write!(buffer, "\x1b[48;2;28;34;50m");
+            for _ in 0..pad {
+                buffer.push(' ');
+            }
+            buffer.push_str("\x1b[0m");
+        }
+        return;
+    }
+
     if !osd_visible {
         return;
     }
@@ -68,7 +152,7 @@ pub fn render_ui(
     let play_icon = if state.is_paused {
         "\x1b[38;2;250;180;50m ⏸ PAUSE "
     } else {
-        "\x1b[38;2;80;220;120m ▶ PLAY "
+        "\x1b[38;2;80;220;120m ▶ PLAY  "
     };
 
     // Time formatted
@@ -182,24 +266,31 @@ fn strip_ansi(s: &str) -> String {
 
 fn render_help_modal(cols: u16, rows: u16, buffer: &mut String) {
     let lines = [
-        "─────────────── TermStream Keybindings ───────────────",
-        "  Space            Play / Pause",
-        "  Left / Right     Seek -/+ 5 seconds",
-        "  [ / ]            Seek -/+ 15 seconds",
-        "  0 .. 9           Seek to 0% .. 90%",
-        "  Up / Down        Volume Up / Down (10%)",
-        "  m                Toggle Mute",
-        "  v / M            Cycle Mode (Block/Quad/Braille/Kitty/Sixel)",
+        "───────────────── TermStream Controls ─────────────────",
+        "  Mouse Drag/Click Scrub / Slide progress bar directly ",
+        "  Mouse Wheel      Seek -/+ 5 seconds                  ",
+        "  g / :            Jump to timestamp (e.g. 1:23, 50%)  ",
+        "  Space / k        Play / Pause                        ",
+        "  Left / Right     Seek -/+ 5 seconds                  ",
+        "  Shift+Left/Right Seek -/+ 30 seconds                 ",
+        "  [ / ]            Seek -/+ 15 seconds                 ",
+        "  PageUp / PageDn  Seek -/+ 60 seconds                 ",
+        "  Home / End       Jump to Start / End                 ",
+        "  . / ,            Step frame forward / backward       ",
+        "  0 .. 9           Seek to 0% .. 90%                   ",
+        "  Up / Down        Volume Up / Down (10%)              ",
+        "  m                Toggle Mute                         ",
+        "  v / M            Cycle Mode (Block/Quad/Braille/...) ",
         "  a                Cycle Aspect Ratio (Fit/Fill/Stretch)",
-        "  f                Cycle Color Filter (Green/Amber/Cyan/Mono)",
-        "  b / B            Adjust Brightness (- / +)",
-        "  c / C            Adjust Contrast (- / +)",
-        "  i                Invert Colors",
-        "  r                Reset Video Adjustments",
-        "  l                Toggle Looping",
+        "  f                Cycle Color Filter (Green/Amber/...) ",
+        "  b / B            Adjust Brightness (- / +)           ",
+        "  c / C            Adjust Contrast (- / +)             ",
+        "  i                Invert Colors                       ",
+        "  r                Reset Video Adjustments             ",
+        "  p / L            Toggle Looping                      ",
         "  Tab / o          Cycle OSD Mode (Auto / Always / Off)",
-        "  ? / h            Toggle this Help Screen",
-        "  q / Esc          Quit",
+        "  ? / h            Toggle this Help Screen             ",
+        "  q / Esc          Quit                                ",
         "───────────────────────────────────────────────────────",
     ];
 

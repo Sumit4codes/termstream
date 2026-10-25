@@ -175,9 +175,9 @@ fn test_pcm_source_chunked_streaming() {
     assert_eq!(source.next(), Some(-400));
     assert_eq!(samples_played.load(Ordering::Relaxed), 4);
 
-    // When empty, should yield silence without blocking
+    // When empty, should yield silence without blocking and without incrementing stream sample count
     assert_eq!(source.next(), Some(0));
-    assert_eq!(samples_played.load(Ordering::Relaxed), 5);
+    assert_eq!(samples_played.load(Ordering::Relaxed), 4);
 
     // Drop sender -> Disconnected -> iterator should return None
     drop(tx);
@@ -410,4 +410,46 @@ fn test_render_modes_pixel_cycle() {
     assert_eq!(RenderMode::Sixel.subpixels(), (3, 6));
     assert!(RenderMode::Kitty.name().contains("Kitty Pixel Graphics"));
     assert!(RenderMode::Sixel.name().contains("Sixel Pixel Graphics"));
+}
+
+#[test]
+fn test_parse_timestamp() {
+    use termstream::ui::parse_timestamp;
+
+    let dur = 300.0; // 5 minutes
+
+    // Percentages
+    assert_eq!(parse_timestamp("0%", dur), Some(0.0));
+    assert_eq!(parse_timestamp("50%", dur), Some(150.0));
+    assert_eq!(parse_timestamp("100%", dur), Some(300.0));
+    assert_eq!(parse_timestamp("200%", dur), Some(300.0)); // Clamped to duration
+
+    // MM:SS
+    assert_eq!(parse_timestamp("00:00", dur), Some(0.0));
+    assert_eq!(parse_timestamp("1:23", dur), Some(83.0));
+    assert_eq!(parse_timestamp("04:30", dur), Some(270.0));
+
+    // HH:MM:SS
+    assert_eq!(parse_timestamp("01:00:00", 7200.0), Some(3600.0));
+    assert_eq!(parse_timestamp("1:15:30", 7200.0), Some(4530.0));
+
+    // Seconds with/without suffix
+    assert_eq!(parse_timestamp("45", dur), Some(45.0));
+    assert_eq!(parse_timestamp("90s", dur), Some(90.0));
+    assert_eq!(parse_timestamp("120.5", dur), Some(120.5));
+
+    // Invalid formats
+    assert_eq!(parse_timestamp("", dur), None);
+    assert_eq!(parse_timestamp("invalid", dur), None);
+    assert_eq!(parse_timestamp("1:2:3:4", dur), None);
+}
+
+#[test]
+fn test_progress_bar_cols_bounds() {
+    use termstream::ui::progress_bar_cols;
+
+    let (start, end) = progress_bar_cols(100, 10.0, 120.0);
+    assert!(start > 0);
+    assert!(end > start);
+    assert!(end < 100);
 }

@@ -1,10 +1,15 @@
 use std::io::{stdout, Write};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
     cursor::{Hide, Show},
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+        MouseButton, MouseEventKind,
+    },
     execute,
     terminal::{
         disable_raw_mode, enable_raw_mode, size as terminal_size,
@@ -90,7 +95,7 @@ impl Drop for TerminalCleanup {
         let mut out = stdout();
         // Clear sync mode and any active Kitty graphics placements
         let _ = write!(out, "\x1b[?2026l\x1b_Ga=d,d=a\x1b\\");
-        let _ = execute!(out, Show, LeaveAlternateScreen);
+        let _ = execute!(out, Show, LeaveAlternateScreen, DisableMouseCapture);
         let _ = disable_raw_mode();
         let _ = out.flush();
     }
@@ -211,7 +216,7 @@ fn main() -> Result<()> {
 fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()> {
     enable_raw_mode()?;
     let mut out = stdout();
-    execute!(out, EnterAlternateScreen, Hide)?;
+    execute!(out, EnterAlternateScreen, Hide, EnableMouseCapture)?;
     let _cleanup = TerminalCleanup;
 
     let (mut cols, mut rows) = terminal_size().unwrap_or((80, 24));
@@ -257,6 +262,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
         show_help: false,
         osd_mode,
         message: None,
+        jump_prompt: None,
     };
 
     // Calculate pixel dimensions needed for current mode
@@ -272,7 +278,10 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
         px_per_row,
     );
 
-    let start_decoders = |source: &VideoSource, geom: &RenderGeometry, fps: f64, seek: f64| {
+    let playback_pts = Arc::new(AtomicU64::new(0));
+    let playback_pts_clone = Arc::clone(&playback_pts);
+
+    let start_decoders = move |source: &VideoSource, geom: &RenderGeometry, fps: f64, seek: f64| {
         match source {
             VideoSource::Ffmpeg { video_path, .. } => {
                 let dec = VideoStreamDecoder::start(
@@ -281,6 +290,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                     geom.pixel_height,
                     fps,
                     seek,
+                    Arc::clone(&playback_pts_clone),
                 );
                 (Some(dec.expect("Failed to start video decoder")), None)
             }
@@ -303,6 +313,8 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
     let _ = audio.start(0.0);
     clock.start();
 
+    let mut pending_resize_at: Option<Instant> = None;
+    let mut is_scrubbing_bar = false;
     let mut current_frame: Option<VideoFrame> = None;
     let mut queued_frame: Option<VideoFrame> = None;
     let mut buffer = String::with_capacity((cols as usize * rows as usize) * 35);
@@ -312,21 +324,18 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
 
     loop {
         // Compute Current Master Clock PTS
-        let clock_pts = clock.get_pts();
         let current_pts = if !clock.is_paused() {
             if let Some(apts) = audio.current_pts() {
-                if (apts - clock_pts).abs() < 1.0 {
-                    apts
-                } else {
-                    clock_pts
-                }
+                clock.seek_to(apts);
+                apts
             } else {
-                clock_pts
+                clock.get_pts()
             }
         } else {
-            clock_pts
+            clock.get_pts()
         };
         ui_state.current_pts = current_pts;
+        playback_pts.store((current_pts * 1000.0) as u64, Ordering::Relaxed);
         let mut needs_render = false;
 
         // Periodically verify terminal size in case resize event was missed by terminal (e.g. font zoom in/out)
@@ -344,7 +353,15 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                     px_c,
                     px_r,
                 );
-                let pts = clock.get_pts();
+                pending_resize_at = Some(Instant::now());
+            }
+        }
+
+        // Debounced resize: restart decoder once resizing stabilizes
+        if let Some(resize_time) = pending_resize_at {
+            if resize_time.elapsed() >= Duration::from_millis(80) {
+                pending_resize_at = None;
+                let pts = current_pts;
                 let (dec, gen) = start_decoders(&source, &geom, fps, pts);
                 ffmpeg_decoder = dec;
                 proc_generator = gen;
@@ -360,6 +377,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
         if meta.duration_secs > 0.0 && current_pts >= meta.duration_secs {
             if is_looping {
                 clock.seek_to(0.0);
+                playback_pts.store(0, Ordering::SeqCst);
                 let (dec, gen) = start_decoders(&source, &geom, fps, 0.0);
                 ffmpeg_decoder = dec;
                 proc_generator = gen;
@@ -397,7 +415,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
 
                 // Frame-skipping: catch up if falling behind clock
                 if let Some(rx) = receiver {
-                    while best_frame.pts_secs < current_pts - frame_interval * 1.5 {
+                    while best_frame.pts_secs < current_pts - frame_interval {
                         if let Ok(next) = rx.try_recv() {
                             best_frame = next;
                         } else {
@@ -406,8 +424,12 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                     }
                 }
 
-                current_frame = Some(best_frame);
-                needs_render = true;
+                if best_frame.pts_secs >= current_pts - frame_interval * 1.5 || clock.is_paused() {
+                    current_frame = Some(best_frame);
+                    needs_render = true;
+                } else {
+                    needs_render = false;
+                }
             } else {
                 // Frame is in future, put it back
                 queued_frame = Some(f);
@@ -432,8 +454,61 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
                         last_interaction = Instant::now();
                         needs_render = true;
+
+                        if let Some(ref mut input) = ui_state.jump_prompt {
+                            match key.code {
+                                KeyCode::Esc => {
+                                    ui_state.jump_prompt = None;
+                                    ui_state.set_message("Jump cancelled");
+                                }
+                                KeyCode::Enter => {
+                                    let parsed = ui::parse_timestamp(input, meta.duration_secs);
+                                    let input_display = input.clone();
+                                    ui_state.jump_prompt = None;
+                                    if let Some(target_pts) = parsed {
+                                        let new_pts = if meta.duration_secs > 0.0 {
+                                            target_pts.clamp(0.0, meta.duration_secs)
+                                        } else {
+                                            target_pts.max(0.0)
+                                        };
+                                        clock.seek_to(new_pts);
+                                        playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
+                                        let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                        ffmpeg_decoder = dec;
+                                        proc_generator = gen;
+                                        queued_frame = None;
+                                        current_frame = None;
+                                        let _ = audio.start(new_pts);
+                                        ui_state.set_message(format!("Jumped to {}", ui::format_time(new_pts)));
+                                    } else {
+                                        ui_state.set_message(format!("Invalid time: '{}'", input_display));
+                                    }
+                                }
+                                KeyCode::Backspace => {
+                                    input.pop();
+                                }
+                                KeyCode::Char(c)
+                                    if c.is_ascii_digit()
+                                        || c == ':'
+                                        || c == '.'
+                                        || c == '%'
+                                        || c == 's'
+                                        || c == 'm'
+                                        || c == 'h' =>
+                                {
+                                    input.push(c);
+                                }
+                                _ => {}
+                            }
+                            continue;
+                        }
+
                         match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                            KeyCode::Char('g') | KeyCode::Char(':') => {
+                                ui_state.jump_prompt = Some(String::new());
+                                ui_state.set_message("Type timestamp (e.g. 1:23, 90s, 50%) & Enter");
+                            }
                             KeyCode::Char(' ') | KeyCode::Char('k') => {
                                 let paused = clock.toggle_pause();
                                 ui_state.is_paused = paused;
@@ -445,9 +520,105 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                                     ui_state.set_message("PLAYING");
                                 }
                             }
+                            KeyCode::PageUp => {
+                                let new_pts = (clock.get_pts() + 60.0).min(meta.duration_secs.max(60000.0));
+                                clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                let _ = audio.start(new_pts);
+                                ui_state.set_message("+60s Fast-Forward");
+                            }
+                            KeyCode::PageDown => {
+                                let new_pts = (clock.get_pts() - 60.0).max(0.0);
+                                clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                let _ = audio.start(new_pts);
+                                ui_state.set_message("-60s Rewind");
+                            }
+                            KeyCode::Home => {
+                                clock.seek_to(0.0);
+                                playback_pts.store(0, Ordering::SeqCst);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, 0.0);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                current_frame = None;
+                                let _ = audio.start(0.0);
+                                ui_state.set_message("Jumped to Start (00:00)");
+                            }
+                            KeyCode::End if meta.duration_secs > 0.0 => {
+                                let new_pts = (meta.duration_secs - 1.0).max(0.0);
+                                clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                current_frame = None;
+                                let _ = audio.start(new_pts);
+                                ui_state.set_message("Jumped to End");
+                            }
+                            KeyCode::Char('.') => {
+                                clock.pause();
+                                audio.pause();
+                                ui_state.is_paused = true;
+                                let new_pts = (clock.get_pts() + frame_interval).min(meta.duration_secs.max(60000.0));
+                                clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                current_frame = None;
+                                ui_state.set_message(format!("Frame Step +1 ({})", ui::format_time(new_pts)));
+                            }
+                            KeyCode::Char(',') => {
+                                clock.pause();
+                                audio.pause();
+                                ui_state.is_paused = true;
+                                let new_pts = (clock.get_pts() - frame_interval).max(0.0);
+                                clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                current_frame = None;
+                                ui_state.set_message(format!("Frame Step -1 ({})", ui::format_time(new_pts)));
+                            }
+                            KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                let new_pts = (clock.get_pts() + 30.0).min(meta.duration_secs.max(60000.0));
+                                clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                let _ = audio.start(new_pts);
+                                ui_state.set_message("+30s Seek");
+                            }
+                            KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                let new_pts = (clock.get_pts() - 30.0).max(0.0);
+                                clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                let _ = audio.start(new_pts);
+                                ui_state.set_message("-30s Seek");
+                            }
                             KeyCode::Right | KeyCode::Char('l') => {
                                 let new_pts = (clock.get_pts() + 5.0).min(meta.duration_secs.max(60000.0));
                                 clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
                                 let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
                                 ffmpeg_decoder = dec;
                                 proc_generator = gen;
@@ -458,6 +629,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                             KeyCode::Left | KeyCode::Char('j') => {
                                 let new_pts = (clock.get_pts() - 5.0).max(0.0);
                                 clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
                                 let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
                                 ffmpeg_decoder = dec;
                                 proc_generator = gen;
@@ -468,6 +640,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                             KeyCode::Char(']') | KeyCode::Char('>') => {
                                 let new_pts = (clock.get_pts() + 15.0).min(meta.duration_secs.max(60000.0));
                                 clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
                                 let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
                                 ffmpeg_decoder = dec;
                                 proc_generator = gen;
@@ -478,6 +651,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                             KeyCode::Char('[') | KeyCode::Char('<') => {
                                 let new_pts = (clock.get_pts() - 15.0).max(0.0);
                                 clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
                                 let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
                                 ffmpeg_decoder = dec;
                                 proc_generator = gen;
@@ -489,6 +663,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                                 let frac = (c as u32 - '0' as u32) as f64 / 10.0;
                                 let new_pts = meta.duration_secs * frac;
                                 clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
                                 let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
                                 ffmpeg_decoder = dec;
                                 proc_generator = gen;
@@ -526,7 +701,8 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                                     px_c,
                                     px_r,
                                 );
-                                let pts = clock.get_pts();
+                                let pts = current_pts;
+                                playback_pts.store((pts * 1000.0) as u64, Ordering::SeqCst);
                                 let (dec, gen) = start_decoders(&source, &geom, fps, pts);
                                 ffmpeg_decoder = dec;
                                 proc_generator = gen;
@@ -549,7 +725,8 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                                     px_c,
                                     px_r,
                                 );
-                                let pts = clock.get_pts();
+                                let pts = current_pts;
+                                playback_pts.store((pts * 1000.0) as u64, Ordering::SeqCst);
                                 let (dec, gen) = start_decoders(&source, &geom, fps, pts);
                                 ffmpeg_decoder = dec;
                                 proc_generator = gen;
@@ -626,27 +803,114 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                             _ => {}
                         }
                     }
+                    Event::Mouse(mouse) => {
+                        match mouse.kind {
+                            MouseEventKind::Down(MouseButton::Left) => {
+                                let (bar_start, bar_end) =
+                                    ui::progress_bar_cols(cols, current_pts, meta.duration_secs);
+                                let on_bar_row = mouse.row == rows.saturating_sub(1);
+                                if on_bar_row
+                                    && mouse.column >= bar_start
+                                    && mouse.column <= bar_end
+                                    && meta.duration_secs > 0.0
+                                {
+                                    is_scrubbing_bar = true;
+                                    last_interaction = Instant::now();
+                                    let bar_width = (bar_end.saturating_sub(bar_start + 1)).max(1);
+                                    let frac = ((mouse.column.saturating_sub(bar_start)) as f64
+                                        / bar_width as f64)
+                                        .clamp(0.0, 1.0);
+                                    let new_pts = (meta.duration_secs * frac).clamp(0.0, meta.duration_secs);
+                                    clock.seek_to(new_pts);
+                                    playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
+                                    let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                    ffmpeg_decoder = dec;
+                                    proc_generator = gen;
+                                    queued_frame = None;
+                                    current_frame = None;
+                                    let _ = audio.start(new_pts);
+                                    ui_state.set_message(format!(
+                                        "Scrub: {} ({:.0}%)",
+                                        ui::format_time(new_pts),
+                                        frac * 100.0
+                                    ));
+                                    needs_render = true;
+                                }
+                            }
+                            MouseEventKind::Drag(MouseButton::Left) => {
+                                if is_scrubbing_bar && meta.duration_secs > 0.0 {
+                                    last_interaction = Instant::now();
+                                    let (bar_start, bar_end) =
+                                        ui::progress_bar_cols(cols, current_pts, meta.duration_secs);
+                                    let bar_width = (bar_end.saturating_sub(bar_start + 1)).max(1);
+                                    let frac = ((mouse.column.saturating_sub(bar_start)) as f64
+                                        / bar_width as f64)
+                                        .clamp(0.0, 1.0);
+                                    let new_pts = (meta.duration_secs * frac).clamp(0.0, meta.duration_secs);
+                                    clock.seek_to(new_pts);
+                                    playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
+                                    let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                    ffmpeg_decoder = dec;
+                                    proc_generator = gen;
+                                    queued_frame = None;
+                                    current_frame = None;
+                                    let _ = audio.start(new_pts);
+                                    ui_state.set_message(format!(
+                                        "Scrub: {} ({:.0}%)",
+                                        ui::format_time(new_pts),
+                                        frac * 100.0
+                                    ));
+                                    needs_render = true;
+                                }
+                            }
+                            MouseEventKind::Up(MouseButton::Left) => {
+                                is_scrubbing_bar = false;
+                            }
+                            MouseEventKind::ScrollUp => {
+                                last_interaction = Instant::now();
+                                let new_pts = (clock.get_pts() + 5.0).min(meta.duration_secs.max(60000.0));
+                                clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                let _ = audio.start(new_pts);
+                                ui_state.set_message("+5s Seek");
+                                needs_render = true;
+                            }
+                            MouseEventKind::ScrollDown => {
+                                last_interaction = Instant::now();
+                                let new_pts = (clock.get_pts() - 5.0).max(0.0);
+                                clock.seek_to(new_pts);
+                                playback_pts.store((new_pts * 1000.0) as u64, Ordering::SeqCst);
+                                let (dec, gen) = start_decoders(&source, &geom, fps, new_pts);
+                                ffmpeg_decoder = dec;
+                                proc_generator = gen;
+                                queued_frame = None;
+                                let _ = audio.start(new_pts);
+                                ui_state.set_message("-5s Seek");
+                                needs_render = true;
+                            }
+                            _ => {}
+                        }
+                    }
                     Event::Resize(new_cols, new_rows) => {
-                        cols = new_cols;
-                        rows = new_rows;
-                        let (px_c, px_r) = current_mode.subpixels();
-                        geom = RenderGeometry::calculate(
-                            cols,
-                            rows.saturating_sub(1),
-                            meta.width,
-                            meta.height,
-                            current_scaling,
-                            px_c,
-                            px_r,
-                        );
-                        let pts = clock.get_pts();
-                        let (dec, gen) = start_decoders(&source, &geom, fps, pts);
-                        ffmpeg_decoder = dec;
-                        proc_generator = gen;
-                        queued_frame = None;
-                        current_frame = None;
-                        let _ = execute!(out, crossterm::terminal::Clear(crossterm::terminal::ClearType::All));
-                        needs_render = true;
+                        if new_cols > 0 && new_rows > 0 {
+                            cols = new_cols;
+                            rows = new_rows;
+                            let (px_c, px_r) = current_mode.subpixels();
+                            geom = RenderGeometry::calculate(
+                                cols,
+                                rows.saturating_sub(1),
+                                meta.width,
+                                meta.height,
+                                current_scaling,
+                                px_c,
+                                px_r,
+                            );
+                            pending_resize_at = Some(Instant::now());
+                        }
                     }
                     _ => {}
                 }

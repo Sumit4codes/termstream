@@ -1,6 +1,6 @@
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use anyhow::{Context, Result};
@@ -128,12 +128,14 @@ impl VideoStreamDecoder {
         target_height: u32,
         fps: f64,
         seek_secs: f64,
+        playback_pts: Arc<AtomicU64>,
     ) -> Result<Self> {
         let stop_signal = Arc::new(AtomicBool::new(false));
-        let (sender, receiver) = bounded::<VideoFrame>(4);
+        let (sender, receiver) = bounded::<VideoFrame>(2);
 
         let mut cmd = Command::new("ffmpeg");
         cmd.args(["-v", "error"]);
+        cmd.args(["-threads", "0"]);
 
         if seek_secs > 0.0 {
             cmd.args(["-ss", &format!("{:.3}", seek_secs)]);
@@ -143,7 +145,7 @@ impl VideoStreamDecoder {
             "-i", &path,
             "-an",
             "-sn",
-            "-sws_flags", "lanczos+accurate_rnd",
+            "-sws_flags", "fast_bilinear",
             "-f", "rawvideo",
             "-pix_fmt", "rgb24",
             "-s", &format!("{}x{}", target_width, target_height),
@@ -192,14 +194,22 @@ impl VideoStreamDecoder {
                         break;
                     }
 
+                    let frame_pts = seek_secs + (frame_idx as f64 * frame_duration);
+                    frame_idx += 1;
+
+                    let cur_pts = playback_pts.load(Ordering::Relaxed) as f64 / 1000.0;
+                    // If this frame is lagging behind playback by more than 1.2 frame intervals,
+                    // drop it right here without allocating or pushing to channel
+                    if cur_pts > seek_secs && frame_pts < cur_pts - frame_duration * 1.2 {
+                        continue;
+                    }
+
                     let frame = VideoFrame {
                         width: target_width,
                         height: target_height,
-                        pts_secs: seek_secs + (frame_idx as f64 * frame_duration),
+                        pts_secs: frame_pts,
                         data: buffer.clone(),
                     };
-
-                    frame_idx += 1;
 
                     if sender.send(frame).is_err() {
                         // Consumer dropped

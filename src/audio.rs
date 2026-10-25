@@ -47,8 +47,7 @@ impl Iterator for PcmSource {
                 }
                 Err(TryRecvError::Empty) => {
                     // Small underrun: output silence without hanging audio callback.
-                    // Advance samples_played so PTS stays locked to real-time.
-                    self.samples_played.fetch_add(1, Ordering::Relaxed);
+                    // Do NOT increment samples_played so PTS stays locked to real stream samples.
                     return Some(0);
                 }
                 Err(TryRecvError::Disconnected) => {
@@ -225,7 +224,7 @@ impl AudioPlayer {
 
         // Pre-buffer initial audio so playback begins immediately without underrun
         let wait_start = std::time::Instant::now();
-        while rx.is_empty() && wait_start.elapsed() < Duration::from_millis(150) {
+        while rx.is_empty() && wait_start.elapsed() < Duration::from_millis(1500) {
             thread::sleep(Duration::from_millis(5));
         }
 
@@ -251,7 +250,10 @@ impl AudioPlayer {
         let base_ms = self.base_seek_ms.load(Ordering::Relaxed);
         // Stereo: 2 samples per audio frame at 44100 Hz
         let audio_secs = samples as f64 / (44100.0 * 2.0);
-        Some((base_ms as f64 / 1000.0) + audio_secs)
+        // Compensate for soundcard output buffer latency (~20ms in CPAL ring buffer)
+        let latency_compensation = 0.020;
+        let adj_audio_secs = (audio_secs - latency_compensation).max(0.0);
+        Some((base_ms as f64 / 1000.0) + adj_audio_secs)
     }
 
     pub fn set_volume(&mut self, vol: f32) {

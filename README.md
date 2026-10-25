@@ -148,15 +148,24 @@ termstream --grid "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
 
 ---
 
-## ⌨️ Interactive Keybindings
+## ⌨️ Interactive Controls
 
-| Key | Action |
+| Control | Action |
 |:---:|:---|
+| <kbd>Mouse Click / Drag</kbd> | **Scrub / Slide progress bar directly** with real-time preview |
+| <kbd>Mouse Scroll</kbd> | Seek forward / backward 5 seconds |
+| <kbd>g</kbd> / <kbd>:</kbd> | **Jump to exact time** (e.g. `1:23`, `90s`, `45%`, `01:15:30`) |
 | <kbd>Space</kbd> / <kbd>k</kbd> | Toggle Play / Pause |
 | <kbd>→</kbd> / <kbd>l</kbd> | Seek forward 5 seconds |
 | <kbd>←</kbd> / <kbd>j</kbd> | Seek backward 5 seconds |
+| <kbd>Shift</kbd> + <kbd>→</kbd> | Fast-forward 30 seconds |
+| <kbd>Shift</kbd> + <kbd>←</kbd> | Rewind 30 seconds |
 | <kbd>]</kbd> / <kbd>&gt;</kbd> | Seek forward 15 seconds |
 | <kbd>[</kbd> / <kbd>&lt;</kbd> | Seek backward 15 seconds |
+| <kbd>PageUp</kbd> | Fast-forward 60 seconds (1 minute) |
+| <kbd>PageDown</kbd> | Rewind 60 seconds (1 minute) |
+| <kbd>Home</kbd> / <kbd>End</kbd> | Jump directly to Start (00:00) / End of video |
+| <kbd>.</kbd> / <kbd>,</kbd> | Step 1 frame forward / backward (pauses playback) |
 | <kbd>0</kbd> .. <kbd>9</kbd> | Seek directly to 0% .. 90% of video duration |
 | <kbd>↑</kbd> / <kbd>+</kbd> | Volume up 10% (up to 300%) |
 | <kbd>↓</kbd> / <kbd>-</kbd> | Volume down 10% |

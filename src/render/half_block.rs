@@ -1,5 +1,4 @@
-use std::fmt::Write;
-use crate::render::{ColorLut, RenderGeometry};
+use crate::render::{append_bg_rgb, append_fg_rgb, ColorLut, RenderGeometry};
 use crate::types::VideoFrame;
 
 pub fn render_half_block(
@@ -85,11 +84,11 @@ pub fn render_half_block(
 
             // Optimize ANSI escape sequences
             if last_fg != Some((top_r, top_g, top_b)) {
-                let _ = write!(buffer, "\x1b[38;2;{};{};{}m", top_r, top_g, top_b);
+                append_fg_rgb(buffer, top_r, top_g, top_b);
                 last_fg = Some((top_r, top_g, top_b));
             }
             if last_bg != Some((bot_r, bot_g, bot_b)) {
-                let _ = write!(buffer, "\x1b[48;2;{};{};{}m", bot_r, bot_g, bot_b);
+                append_bg_rgb(buffer, bot_r, bot_g, bot_b);
                 last_bg = Some((bot_r, bot_g, bot_b));
             }
 

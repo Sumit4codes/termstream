@@ -1,5 +1,4 @@
-use std::fmt::Write;
-use crate::render::{ColorLut, RenderGeometry};
+use crate::render::{append_bg_rgb, append_fg_rgb, ColorLut, RenderGeometry};
 use crate::types::VideoFrame;
 
 pub fn render_braille(
@@ -147,7 +146,7 @@ pub fn render_braille(
                 let bg_b = (total_b_bg / count_bg.max(1)) as u8;
 
                 if last_bg != Some((bg_r, bg_g, bg_b)) {
-                    let _ = write!(buffer, "\x1b[48;2;{};{};{}m", bg_r, bg_g, bg_b);
+                    append_bg_rgb(buffer, bg_r, bg_g, bg_b);
                     last_bg = Some((bg_r, bg_g, bg_b));
                 }
                 buffer.push(' ');
@@ -157,7 +156,7 @@ pub fn render_braille(
                 let fg_b = (total_b_fg / count_fg) as u8;
 
                 if last_fg != Some((fg_r, fg_g, fg_b)) {
-                    let _ = write!(buffer, "\x1b[38;2;{};{};{}m", fg_r, fg_g, fg_b);
+                    append_fg_rgb(buffer, fg_r, fg_g, fg_b);
                     last_fg = Some((fg_r, fg_g, fg_b));
                 }
                 if last_bg.is_some() {
@@ -175,11 +174,11 @@ pub fn render_braille(
                 let bg_b = (total_b_bg / count_bg) as u8;
 
                 if last_fg != Some((fg_r, fg_g, fg_b)) {
-                    let _ = write!(buffer, "\x1b[38;2;{};{};{}m", fg_r, fg_g, fg_b);
+                    append_fg_rgb(buffer, fg_r, fg_g, fg_b);
                     last_fg = Some((fg_r, fg_g, fg_b));
                 }
                 if last_bg != Some((bg_r, bg_g, bg_b)) {
-                    let _ = write!(buffer, "\x1b[48;2;{};{};{}m", bg_r, bg_g, bg_b);
+                    append_bg_rgb(buffer, bg_r, bg_g, bg_b);
                     last_bg = Some((bg_r, bg_g, bg_b));
                 }
 

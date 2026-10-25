@@ -1,5 +1,4 @@
-use std::fmt::Write;
-use crate::render::{ColorLut, RenderGeometry};
+use crate::render::{append_bg_rgb, append_fg_rgb, ColorLut, RenderGeometry};
 use crate::types::VideoFrame;
 
 /// 16 Unicode quadrant block characters corresponding to 4-bit masks
@@ -139,7 +138,7 @@ pub fn render_quadrant(
                     (bg_b / bg_count.max(1)) as u8,
                 );
                 if last_bg != Some(col) {
-                    let _ = write!(buffer, "\x1b[48;2;{};{};{}m", col.0, col.1, col.2);
+                    append_bg_rgb(buffer, col.0, col.1, col.2);
                     last_bg = Some(col);
                 }
                 buffer.push(' ');
@@ -150,7 +149,7 @@ pub fn render_quadrant(
                     (fg_b / fg_count) as u8,
                 );
                 if last_fg != Some(col) {
-                    let _ = write!(buffer, "\x1b[38;2;{};{};{}m", col.0, col.1, col.2);
+                    append_fg_rgb(buffer, col.0, col.1, col.2);
                     last_fg = Some(col);
                 }
                 if last_bg.is_some() {
@@ -171,11 +170,11 @@ pub fn render_quadrant(
                 );
 
                 if last_fg != Some(fg_col) {
-                    let _ = write!(buffer, "\x1b[38;2;{};{};{}m", fg_col.0, fg_col.1, fg_col.2);
+                    append_fg_rgb(buffer, fg_col.0, fg_col.1, fg_col.2);
                     last_fg = Some(fg_col);
                 }
                 if last_bg != Some(bg_col) {
-                    let _ = write!(buffer, "\x1b[48;2;{};{};{}m", bg_col.0, bg_col.1, bg_col.2);
+                    append_bg_rgb(buffer, bg_col.0, bg_col.1, bg_col.2);
                     last_bg = Some(bg_col);
                 }
                 buffer.push(QUADRANTS[mask]);
