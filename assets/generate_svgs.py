@@ -143,7 +143,7 @@ def generate_all():
     with open("/tmp/opencode_hero_frame.txt") as f:
         hero_text = f.read()
     hero_parsed = parse_ansi_text(hero_text)
-    hero_svg = render_terminal_svg(hero_parsed, title="termstream — 82×24 — Quadrant 2x2 Hi-Res TrueColor", font_size=13, char_w=8.4, line_h=18)
+    hero_svg = render_terminal_svg(hero_parsed, title="termstream — Big_Buck_Bunny_720p.mp4 (84×24) — Quadrant 2x2 TrueColor", font_size=13, char_w=8.4, line_h=18)
     with open("assets/hero_player.svg", "w") as f:
         f.write(hero_svg)
 
@@ -151,7 +151,7 @@ def generate_all():
     with open("/tmp/opencode_storyboard.txt") as f:
         storyboard_text = f.read()
     storyboard_parsed = parse_ansi_text(storyboard_text)
-    storyboard_svg = render_terminal_svg(storyboard_parsed, title="termstream --grid test:bars — 3×3 Video Storyboard Contact Sheet", font_size=12, char_w=7.8, line_h=16.5)
+    storyboard_svg = render_terminal_svg(storyboard_parsed, title="termstream --grid Big_Buck_Bunny_720p.mp4 — 3×3 Contact Sheet", font_size=12, char_w=7.8, line_h=16.5)
     with open("assets/storyboard_grid.svg", "w") as f:
         f.write(storyboard_svg)
 

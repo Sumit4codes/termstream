@@ -481,37 +481,39 @@ fn test_display_inhibitor_lifecycle() {
 #[ignore]
 fn generate_readme_frames() {
     use termstream::generator::{ProceduralGenerator, TestPattern};
+    use termstream::render::ascii::render_ascii;
+    use termstream::render::braille::render_braille;
     use termstream::render::half_block::render_half_block;
     use termstream::render::quadrant::render_quadrant;
-    use termstream::render::braille::render_braille;
-    use termstream::render::ascii::render_ascii;
     use termstream::render::{ColorLut, RenderGeometry};
+    use termstream::storyboard::extract_frame;
     use termstream::types::{ColorFilter, OsdMode, RenderMode, ScalingMode, VideoFrame};
     use termstream::ui::{render_ui, UiState};
 
-    let cols = 82u16;
+    let cols = 84u16;
     let rows = 24u16;
+    let video_path = "/tmp/bbb_720p.webm";
 
-    // 1. Hero Player: Plasma in Quadrant mode with UI
+    // 1. Hero Player: Real Video (Big Buck Bunny) in Quadrant 2x2 mode with UI
     {
         let (px_c, px_r) = RenderMode::Quadrant.subpixels();
-        let geom = RenderGeometry::calculate(cols, rows - 1, 320, 180, ScalingMode::Fit, px_c, px_r);
+        let geom = RenderGeometry::calculate(cols, rows - 1, 1280, 720, ScalingMode::Fit, px_c, px_r);
         let lut = ColorLut::new(0, 1.0, false, ColorFilter::None);
-        let mut data = vec![0u8; (geom.pixel_width * geom.pixel_height * 3) as usize];
-        ProceduralGenerator::render_frame(TestPattern::Plasma, geom.pixel_width, geom.pixel_height, 14.5, &mut data);
-        let frame = VideoFrame {
-            width: geom.pixel_width,
-            height: geom.pixel_height,
-            pts_secs: 14.5,
-            data,
+
+        let frame = if std::path::Path::new(video_path).exists() {
+            extract_frame(video_path, geom.pixel_width, geom.pixel_height, 16.5).unwrap()
+        } else {
+            let mut data = vec![0u8; (geom.pixel_width * geom.pixel_height * 3) as usize];
+            ProceduralGenerator::render_frame(TestPattern::Plasma, geom.pixel_width, geom.pixel_height, 14.5, &mut data);
+            VideoFrame { width: geom.pixel_width, height: geom.pixel_height, pts_secs: 14.5, data }
         };
 
         let mut buffer = String::new();
         render_quadrant(&frame, &geom, &lut, &mut buffer);
 
         let ui_state = UiState {
-            current_pts: 14.5,
-            duration: 120.0,
+            current_pts: 16.5,
+            duration: 29.58,
             is_paused: false,
             volume: 1.2,
             is_muted: false,
@@ -522,7 +524,7 @@ fn generate_readme_frames() {
             brightness: 0,
             contrast: 1.0,
             invert: false,
-            fps: 30.0,
+            fps: 25.0,
             show_help: false,
             osd_mode: OsdMode::AlwaysOn,
             message: None,
@@ -533,62 +535,78 @@ fn generate_readme_frames() {
         std::fs::write("/tmp/opencode_hero_frame.txt", buffer).unwrap();
     }
 
-    // 2. Modes Comparison: 4 mini cards
-    // Mode A: Quadrant
+    // 2. Modes Comparison: 4 mini cards with Real Video scenes
+    // Mode A: Quadrant 2x2 (Real Video scene)
     {
         let w = 40u16;
         let h = 12u16;
         let (px_c, px_r) = RenderMode::Quadrant.subpixels();
-        let geom = RenderGeometry::calculate(w, h, 320, 180, ScalingMode::Fit, px_c, px_r);
+        let geom = RenderGeometry::calculate(w, h, 1280, 720, ScalingMode::Fit, px_c, px_r);
         let lut = ColorLut::new(0, 1.0, false, ColorFilter::None);
-        let mut data = vec![0u8; (geom.pixel_width * geom.pixel_height * 3) as usize];
-        ProceduralGenerator::render_frame(TestPattern::Plasma, geom.pixel_width, geom.pixel_height, 22.0, &mut data);
-        let frame = VideoFrame { width: geom.pixel_width, height: geom.pixel_height, pts_secs: 22.0, data };
+        let frame = if std::path::Path::new(video_path).exists() {
+            extract_frame(video_path, geom.pixel_width, geom.pixel_height, 16.5).unwrap()
+        } else {
+            let mut data = vec![0u8; (geom.pixel_width * geom.pixel_height * 3) as usize];
+            ProceduralGenerator::render_frame(TestPattern::Plasma, geom.pixel_width, geom.pixel_height, 22.0, &mut data);
+            VideoFrame { width: geom.pixel_width, height: geom.pixel_height, pts_secs: 22.0, data }
+        };
         let mut buf = String::new();
         render_quadrant(&frame, &geom, &lut, &mut buf);
         std::fs::write("/tmp/opencode_mode_quadrant.txt", buf).unwrap();
     }
 
-    // Mode B: Braille
+    // Mode B: Braille 2x4 (Real Video scene - high subpixel detail)
     {
         let w = 40u16;
         let h = 12u16;
         let (px_c, px_r) = RenderMode::Braille.subpixels();
-        let geom = RenderGeometry::calculate(w, h, 320, 180, ScalingMode::Fit, px_c, px_r);
+        let geom = RenderGeometry::calculate(w, h, 1280, 720, ScalingMode::Fit, px_c, px_r);
         let lut = ColorLut::new(0, 1.0, false, ColorFilter::None);
-        let mut data = vec![0u8; (geom.pixel_width * geom.pixel_height * 3) as usize];
-        ProceduralGenerator::render_frame(TestPattern::Cube, geom.pixel_width, geom.pixel_height, 8.5, &mut data);
-        let frame = VideoFrame { width: geom.pixel_width, height: geom.pixel_height, pts_secs: 8.5, data };
+        let frame = if std::path::Path::new(video_path).exists() {
+            extract_frame(video_path, geom.pixel_width, geom.pixel_height, 16.5).unwrap()
+        } else {
+            let mut data = vec![0u8; (geom.pixel_width * geom.pixel_height * 3) as usize];
+            ProceduralGenerator::render_frame(TestPattern::Cube, geom.pixel_width, geom.pixel_height, 8.5, &mut data);
+            VideoFrame { width: geom.pixel_width, height: geom.pixel_height, pts_secs: 8.5, data }
+        };
         let mut buf = String::new();
         render_braille(&frame, &geom, &lut, &mut buf);
         std::fs::write("/tmp/opencode_mode_braille.txt", buf).unwrap();
     }
 
-    // Mode C: Matrix CRT
+    // Mode C: Matrix CRT Phosphor (Real Video scene with green phosphor filter)
     {
         let w = 40u16;
         let h = 12u16;
         let (px_c, px_r) = RenderMode::Ascii.subpixels();
-        let geom = RenderGeometry::calculate(w, h, 320, 180, ScalingMode::Fit, px_c, px_r);
+        let geom = RenderGeometry::calculate(w, h, 1280, 720, ScalingMode::Fit, px_c, px_r);
         let lut = ColorLut::new(0, 1.0, false, ColorFilter::MatrixGreen);
-        let mut data = vec![0u8; (geom.pixel_width * geom.pixel_height * 3) as usize];
-        ProceduralGenerator::render_frame(TestPattern::Matrix, geom.pixel_width, geom.pixel_height, 12.0, &mut data);
-        let frame = VideoFrame { width: geom.pixel_width, height: geom.pixel_height, pts_secs: 12.0, data };
+        let frame = if std::path::Path::new(video_path).exists() {
+            extract_frame(video_path, geom.pixel_width, geom.pixel_height, 16.5).unwrap()
+        } else {
+            let mut data = vec![0u8; (geom.pixel_width * geom.pixel_height * 3) as usize];
+            ProceduralGenerator::render_frame(TestPattern::Matrix, geom.pixel_width, geom.pixel_height, 12.0, &mut data);
+            VideoFrame { width: geom.pixel_width, height: geom.pixel_height, pts_secs: 12.0, data }
+        };
         let mut buf = String::new();
         render_ascii(&frame, &geom, &lut, RenderMode::Mono, &mut buf);
         std::fs::write("/tmp/opencode_mode_matrix.txt", buf).unwrap();
     }
 
-    // Mode D: Half-Block
+    // Mode D: Half-Block TrueColor (Real Video scene)
     {
         let w = 40u16;
         let h = 12u16;
         let (px_c, px_r) = RenderMode::HalfBlock.subpixels();
-        let geom = RenderGeometry::calculate(w, h, 320, 180, ScalingMode::Fit, px_c, px_r);
+        let geom = RenderGeometry::calculate(w, h, 1280, 720, ScalingMode::Fit, px_c, px_r);
         let lut = ColorLut::new(0, 1.0, false, ColorFilter::None);
-        let mut data = vec![0u8; (geom.pixel_width * geom.pixel_height * 3) as usize];
-        ProceduralGenerator::render_frame(TestPattern::Bars, geom.pixel_width, geom.pixel_height, 5.0, &mut data);
-        let frame = VideoFrame { width: geom.pixel_width, height: geom.pixel_height, pts_secs: 5.0, data };
+        let frame = if std::path::Path::new(video_path).exists() {
+            extract_frame(video_path, geom.pixel_width, geom.pixel_height, 16.5).unwrap()
+        } else {
+            let mut data = vec![0u8; (geom.pixel_width * geom.pixel_height * 3) as usize];
+            ProceduralGenerator::render_frame(TestPattern::Bars, geom.pixel_width, geom.pixel_height, 5.0, &mut data);
+            VideoFrame { width: geom.pixel_width, height: geom.pixel_height, pts_secs: 5.0, data }
+        };
         let mut buf = String::new();
         render_half_block(&frame, &geom, &lut, &mut buf);
         std::fs::write("/tmp/opencode_mode_halfblock.txt", buf).unwrap();
