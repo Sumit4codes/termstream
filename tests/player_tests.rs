@@ -453,3 +453,26 @@ fn test_progress_bar_cols_bounds() {
     assert!(end > start);
     assert!(end < 100);
 }
+
+#[test]
+fn test_display_inhibitor_lifecycle() {
+    use termstream::power::DisplayInhibitor;
+
+    // Disabled mode
+    let mut disabled = DisplayInhibitor::new(false);
+    assert!(!disabled.is_inhibited());
+    disabled.inhibit();
+    assert!(!disabled.is_inhibited());
+    disabled.uninhibit();
+    assert!(!disabled.is_inhibited());
+
+    // Enabled mode
+    let mut inhibitor = DisplayInhibitor::new(true);
+    assert!(!inhibitor.is_inhibited());
+    inhibitor.inhibit();
+    assert!(inhibitor.is_inhibited());
+    inhibitor.heartbeat();
+    assert!(inhibitor.is_inhibited());
+    inhibitor.uninhibit();
+    assert!(!inhibitor.is_inhibited());
+}

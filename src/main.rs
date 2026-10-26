@@ -21,6 +21,7 @@ use termstream::audio::AudioPlayer;
 use termstream::clock::Clock;
 use termstream::generator::{ProceduralGenerator, TestPattern};
 use termstream::media::{MediaProbe, VideoStreamDecoder};
+use termstream::power::DisplayInhibitor;
 use termstream::render::{
     ascii::render_ascii, braille::render_braille, half_block::render_half_block,
     kitty::render_kitty, quadrant::render_quadrant, sixel::render_sixel, ColorLut, RenderGeometry,
@@ -86,6 +87,10 @@ struct Args {
     /// Generate a 3x3 keyframe storyboard contact sheet and exit
     #[arg(long, aliases = ["storyboard", "contact-sheet"])]
     grid: bool,
+
+    /// Allow screen to sleep or dim while video is playing
+    #[arg(long)]
+    allow_screensaver: bool,
 }
 
 struct TerminalCleanup;
@@ -313,6 +318,9 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
     let _ = audio.start(0.0);
     clock.start();
 
+    let mut inhibitor = DisplayInhibitor::new(!args.allow_screensaver);
+    inhibitor.inhibit();
+
     let mut pending_resize_at: Option<Instant> = None;
     let mut is_scrubbing_bar = false;
     let mut current_frame: Option<VideoFrame> = None;
@@ -336,6 +344,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
         };
         ui_state.current_pts = current_pts;
         playback_pts.store((current_pts * 1000.0) as u64, Ordering::Relaxed);
+        inhibitor.heartbeat();
         let mut needs_render = false;
 
         // Periodically verify terminal size in case resize event was missed by terminal (e.g. font zoom in/out)
@@ -514,9 +523,11 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                                 ui_state.is_paused = paused;
                                 if paused {
                                     audio.pause();
+                                    inhibitor.uninhibit();
                                     ui_state.set_message("PAUSED");
                                 } else {
                                     audio.resume();
+                                    inhibitor.inhibit();
                                     ui_state.set_message("PLAYING");
                                 }
                             }
@@ -568,6 +579,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                             KeyCode::Char('.') => {
                                 clock.pause();
                                 audio.pause();
+                                inhibitor.uninhibit();
                                 ui_state.is_paused = true;
                                 let new_pts = (clock.get_pts() + frame_interval).min(meta.duration_secs.max(60000.0));
                                 clock.seek_to(new_pts);
@@ -582,6 +594,7 @@ fn run_player(args: Args, source: VideoSource, meta: MediaMetadata) -> Result<()
                             KeyCode::Char(',') => {
                                 clock.pause();
                                 audio.pause();
+                                inhibitor.uninhibit();
                                 ui_state.is_paused = true;
                                 let new_pts = (clock.get_pts() - frame_interval).max(0.0);
                                 clock.seek_to(new_pts);
