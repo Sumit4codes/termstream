@@ -15,7 +15,7 @@
 
 <br/>
 
-<img src="assets/hero_player.svg" alt="TermStream Live Terminal Player" width="100%"/>
+<img src="assets/bbb/quad_bbb.png" alt="TermStream Live Terminal Player - Quadrant Mode" width="100%"/>
 
 </div>
 
@@ -35,17 +35,50 @@
 ## 🎨 Visual Showcase & Render Modes
 
 <div align="center">
-  <img src="assets/modes_showcase.svg" alt="TermStream Rendering Modes Showcase" width="100%"/>
+  <table>
+    <tr>
+      <td width="50%" align="center"><b>Quadrant 2×2 Hi-Res (4 Subpixels/Cell)</b></td>
+      <td width="50%" align="center"><b>Adaptive Braille 2×4 Matrix (8 Dots/Cell)</b></td>
+    </tr>
+    <tr>
+      <td><img src="assets/bbb/quad_bbb.png" alt="Quadrant Mode" width="100%"/></td>
+      <td><img src="assets/bbb/braille_bbb.png" alt="Braille Mode" width="100%"/></td>
+    </tr>
+    <tr>
+      <td width="50%" align="center"><b>Half-Block (TrueColor ▀)</b></td>
+      <td width="50%" align="center"><b>Kitty Graphics Protocol (Pixel GPU Texture)</b></td>
+    </tr>
+    <tr>
+      <td><img src="assets/bbb/block_bbb.png" alt="Half-Block Mode" width="100%"/></td>
+      <td><img src="assets/bbb/kitty_pixel_bbb.png" alt="Kitty Pixel Mode" width="100%"/></td>
+    </tr>
+    <tr>
+      <td width="50%" align="center"><b>Retro Phosphor CRT (Matrix Green / Mono)</b></td>
+      <td width="50%" align="center"><b>Unicode Block Shades ( ░▒▓█ )</b></td>
+    </tr>
+    <tr>
+      <td><img src="assets/bbb/mono_bbb.png" alt="Mono CRT Mode" width="100%"/></td>
+      <td><img src="assets/bbb/shade_bbb.png" alt="Shades Mode" width="100%"/></td>
+    </tr>
+    <tr>
+      <td colspan="2" align="center"><b>Classic ASCII Density Ramp ( @%#*+=-:. )</b></td>
+    </tr>
+    <tr>
+      <td colspan="2" align="center"><img src="assets/bbb/ascii_bbb.png" alt="ASCII Mode" width="70%"/></td>
+    </tr>
+  </table>
 </div>
 
 ### Mode Breakdown
 | Mode | Cell Density | Technique | Best For |
 | :--- | :---: | :--- | :--- |
+| **Kitty Protocol (`-m kitty`)** | **Raw GPU Texture** | Chunked Base64 APC direct pixel transfer | 1080p native resolution on Kitty, Ghostty, WezTerm |
 | **Quadrant (`-m quadrant`)** | **2×2 subpixels** | Unicode quadrants with TrueColor FG + BG | Modern high-definition playback, smooth shapes |
 | **Braille (`-m braille`)** | **2×4 dots (8 subpixels)** | Adaptive contrast thresholding + TrueColor tint | High-density line art, technical diagrams, anime |
 | **Half-Block (`-m half-block`)** | **1×2 pixels** | TrueColor upper half with background color | Clean square-pixel 1:1 aspect ratio |
-| **Phosphor CRT (`-f matrix-green`)** | **Textured luma** | Monochrome luminance green/amber phosphor | Demoscene retro aesthetics |
-| **Kitty Protocol (`-m kitty`)** | **Raw GPU Texture** | Chunked Base64 APC direct pixel transfer | 1080p native resolution on Kitty, Ghostty, WezTerm |
+| **Unicode Shades (`-m shades`)** | **Textured luminance** | Unicode 5-level density blocks (` ░▒▓█`) | High-contrast textured retro display |
+| **ASCII Density Ramp (`-m ascii`)** | **Character density** | Retro 70-character luminance ramp | Classic ASCII art terminal aesthetic |
+| **Phosphor CRT (`-m mono -f matrix-green`)** | **Monochrome tint** | Phosphor green/amber luminance filter | Demoscene cyberpunk aesthetic |
 | **Sixel (`-m sixel`)** | **Indexed 64-Color** | Run-length encoded raster pixel graphics | Foot, iTerm2, WezTerm, mlterm |
 
 ---
